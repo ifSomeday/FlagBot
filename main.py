@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-import keys
+import config
 
 if __name__ == "__main__":
 
@@ -17,4 +17,4 @@ if __name__ == "__main__":
     client.load_extension("points")
 
     ##run bot
-    client.run(keys.TOKEN)
+    client.run(config.TOKEN)
