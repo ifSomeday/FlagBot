@@ -1,9 +1,12 @@
 from __future__ import print_function
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 import asyncio
+import aioschedule as schedule
+import datetime
+import time
 import pickle
 import os
 
@@ -27,11 +30,25 @@ class Points(commands.Cog):
         self.sheet = None
         self.currentPageId = 548441837
         self.currentPageName = "11/16"
+        self.insertIdx = 0
 
         self.loadChannel()
         self.loadSheets()
+        self.prepSchedule()
 
         print("Currently tracking points in channel id: {0}".format(self.trackChannel))
+
+        self.scheduler.start()
+
+
+    @tasks.loop(seconds=1)
+    async def scheduler(self):
+        await schedule.run_pending()
+
+    @scheduler.before_loop
+    async def beforeScheduler(self):
+        print("waiting...")
+        await self.bot.wait_until_ready()
 
 
     ## updates the channel to track points in
@@ -81,8 +98,59 @@ class Points(commands.Cog):
         service = discovery.build('sheets', 'v4', credentials=creds)
         self.sheet = service.spreadsheets()
 
-        ##self.duplicateTemplate("11/16")
-        print(self.getAddRacer("user"))
+
+    ## Schedules our tasks around flag times
+    def prepSchedule(self):
+
+        ## Maple doesn't do DST, so we need to account for it
+        dst = time.localtime().tm_isdst
+
+        ## Flag Schedules
+        schedule.every().day.at("{0}:00".format(4+dst)).do(self.updateSubmissionWindow, t=0)    ## Open 4AM submissions
+        schedule.every().day.at("{0}:00".format(5+dst)).do(self.updateSubmissionWindow)         ## Close 4AM submissions
+        schedule.every().day.at("{0}:00".format(11+dst)).do(self.updateSubmissionWindow, t=1)   ## Open 11AM submissions
+        schedule.every().day.at("{0}:00".format(12+dst)).do(self.updateSubmissionWindow)        ## Close 11AM submissions
+        schedule.every().day.at("{0}:00".format(13+dst)).do(self.updateSubmissionWindow, t=2)   ## Open 1PM submissions
+        schedule.every().day.at("{0}:00".format(14+dst)).do(self.updateSubmissionWindow, t=3)   ## Close 1PM submissions, Open 2PM submissions
+        schedule.every().day.at("{0}:00".format(15+dst)).do(self.updateSubmissionWindow, t=4)   ## Close 2PM submissions, Open 3PM submissions
+        schedule.every().day.at("{0}:00".format(16+dst)).do(self.updateSubmissionWindow)        ## Close 3PM submissions
+
+        ## Prepares new sheet for the coming week
+        schedule.every().sunday.at("{0}:00".format(17+dst)).do(self.newWeek)
+
+        ## set up our current submission index, in case bot restarts during submission window.
+        ## we could have used this instead of scheduling, but I like the ideal of a scheduler.
+        ## we would need to use a scheduler for the weekly reset anyway.
+        try:
+            self.insertIdx = {
+                4  + dst : 0,
+                11 + dst : 1,
+                13 + dst : 2,
+                14 + dst : 3,
+                15 + dst : 4
+            }.get(int(datetime.datetime.now().strftime("%H")), None) + 5 + (6 * datetime.datetime.today().weekday())
+        except:
+            self.insertIdx = 0
+        
+        print(self.insertIdx)
+
+
+    ## Updates the active submission window
+    async def updateSubmissionWindow(self, t=None):
+        print("I am updating Submission Window")
+        if(not t == None):
+            self.insertIdx = 5 + (6 * datetime.datetime.today().weekday()) + t
+            print("Set insertIdx to {0}".format(self.insertIdx))
+        else:
+            print("closed submissions")
+            self.insertIdx = 0
+
+
+    ## Barren for now, eventually add weekly leaderboard and stuff
+    async def newWeek(self):
+        tomorrow = datetime.date.today() + datetime.timedelta(days = 1)
+        self.duplicateTemplate(tomorrow.strftime("%m/%d"))
+
 
     ## Duplicate template to new sheet
     def duplicateTemplate(self, newName):
@@ -114,8 +182,6 @@ class Points(commands.Cog):
     ## Gets the column a specified racer is being tracked in, or creates one for them
     ## Also updates the racers username if necessary
     def getAddRacer(self, user):
-        uid = 181465803344838656
-        nick = "JJ"
         if(not self.sheet == None):
             reply = self.sheet.values().get(spreadsheetId=self.spreadsheetId, range=self.currentPageName).execute()
             values = reply.get("values")
@@ -124,12 +190,12 @@ class Points(commands.Cog):
 
             idx = -1
             try:
-                idx = idRow.index(str(uid))
-                if(not tagRow[idx] == nick):
+                idx = idRow.index(str(user.id))
+                if(not tagRow[idx] == user.nickname):
                     updateRange = self.currentPageName + "!" + self.cs(idx) + "3"
                     body = {
                         "values" : [
-                            [nick]
+                            [user.nickname]
                         ]
                     }
                     reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
@@ -137,8 +203,8 @@ class Points(commands.Cog):
                 updateRange = self.currentPageName + "!" + self.cs(len(idRow)) + "2:" + self.cs(len(idRow)) + "3"
                 body = {
                     "values" : [
-                        [str(uid)],
-                        [nick]
+                        [str(user.id)],
+                        [user.nickname]
                     ]
                 }
                 reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
