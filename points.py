@@ -35,6 +35,7 @@ class Points(commands.Cog):
         self.loadChannel()
         self.loadSheets()
         self.prepSchedule()
+        self.getActivePage()
 
         print("Currently tracking points in channel id: {0}".format(self.trackChannel))
 
@@ -132,8 +133,6 @@ class Points(commands.Cog):
         except:
             self.insertIdx = 0
         
-        print(self.insertIdx)
-
 
     ## Updates the active submission window
     async def updateSubmissionWindow(self, t=None):
@@ -211,6 +210,24 @@ class Points(commands.Cog):
                 idx = len(idRow)
             return(idx)
             
+    
+    ## Gets the current active page (always index 0)
+    def getActivePage(self):
+        if(not self.sheet == None):
+            metadata = self.sheet.get(spreadsheetId=self.spreadsheetId).execute()
+            sheets = metadata.get('sheets', '')
+            for sheet in sheets:
+                props = sheet["properties"]
+                if(props["index"] == 0):
+                    if(props["title"] == "Template"):
+                        tomorrow = datetime.date.today() + datetime.timedelta(days = 1)
+                        self.duplicateTemplate(tomorrow.strftime("%m/%d"))
+                    else:
+                        self.currentPageId = props["sheetId"]
+                        self.currentPageName = props["title"]
+                    print(self.currentPageId)
+                    print(self.currentPageName)
+                    return
 
     ## converts a number to the column string
     def cs(self, n):
