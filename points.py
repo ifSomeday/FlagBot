@@ -54,9 +54,10 @@ class Points(commands.Cog):
 
     ## updates the channel to track points in
     @commands.command()
+    @commands.is_owner()
     async def trackChannel(self, ctx, ch : discord.TextChannel):
         await self.updateChannel(ch.id)
-        print(self.trackChannel)
+        print("Now tracking: {0}".format(self.trackChannel))
 
 
     @commands.Cog.listener()
@@ -225,8 +226,6 @@ class Points(commands.Cog):
                     else:
                         self.currentPageId = props["sheetId"]
                         self.currentPageName = props["title"]
-                    print(self.currentPageId)
-                    print(self.currentPageName)
                     return
 
     ## converts a number to the column string
