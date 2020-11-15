@@ -202,7 +202,17 @@ class Points(commands.Cog):
                     self.currentPageName = newName
                     print("Added sheet {0} with id {1}".format(newName, reply.get("replies")[0].get("duplicateSheet").get("properties").get("sheetId")))
 
-                    return
+                    break
+
+            body = {
+                "valueInputOption" : "USER_ENTERED",
+                "data" : []
+            }
+
+            for i in range(1, 8):
+                body["data"].append(templates.batchValueEntry(self.currentPageName + "!A" + str(((i - 1) * 6) + 5), [[(datetime.date.today() + datetime.timedelta(days = i)).strftime("%m/%d")]]))
+
+            reply = self.sheet.values().batchUpdate(spreadsheetId=self.spreadsheetId, body=body).execute()
 
 
     ## Gets the column a specified racer is being tracked in, or creates one for them
