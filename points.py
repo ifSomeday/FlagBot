@@ -15,6 +15,7 @@ from apiclient import discovery
 from google.oauth2 import service_account
 
 import config
+import templates
 
 class Points(commands.Cog):
 
@@ -29,9 +30,11 @@ class Points(commands.Cog):
         self.scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         self.spreadsheetId = config.SHEET_ID
         self.sheet = None
-        self.currentPageId = 548441837
-        self.currentPageName = "11/16"
+        self.currentPageId = 0
+        self.currentPageName = None
         self.insertIdx = 0
+
+        self.COLORS = [(0xf4, 0xcc, 0xcc), (0xfc, 0xe5, 0xcd), (0xff, 0xf2, 0xcc), (0xd9, 0xea, 0xd3), (0xd0, 0xe0, 0xe3), (0xc9, 0xda, 0xf8), (0xcf, 0xe2, 0xf3), (0xd9, 0xd2, 0xe9), (0xea, 0xd1, 0xdc),]
 
         self.loadChannel()
         self.loadSheets()
@@ -85,20 +88,21 @@ class Points(commands.Cog):
 
     ## adds points to the sheet for the given user
     async def addToSheet(self, user, points):
-        try:
-            col = self.getAddRacer(user)
-            updateRange = self.currentPageName + "!" + self.cs(col) + str(self.insertIdx)
-            body = {
-                "values" : [
-                    [points]
-                ]
-            }
-            reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
-            return(True)
-        except Exception as e:
-            print(e)
-            traceback.print_exc()
-            return(False)
+        if(not self.sheet == None):
+            try:
+                col = self.getAddRacer(user)
+                updateRange = self.currentPageName + "!" + self.cs(col) + str(self.insertIdx)
+                body = {
+                    "values" : [
+                        [points]
+                    ]
+                }
+                reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
+                return(True)
+            except Exception as e:
+                print(e)
+                traceback.print_exc()
+        return(False)
 
 
     ## updates the trackChannel and saves to pickle, all under lock
@@ -154,7 +158,7 @@ class Points(commands.Cog):
             }.get(int(datetime.datetime.now().strftime("%H")), None) + 5 + (6 * datetime.datetime.today().weekday())
         except:
             self.insertIdx = 0
-        
+
 
     ## Updates the active submission window
     async def updateSubmissionWindow(self, t=None):
@@ -200,6 +204,7 @@ class Points(commands.Cog):
 
                     return
 
+
     ## Gets the column a specified racer is being tracked in, or creates one for them
     ## Also updates the racers username if necessary
     def getAddRacer(self, user):
@@ -221,15 +226,17 @@ class Points(commands.Cog):
                     }
                     reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
             except:
-                updateRange = self.currentPageName + "!" + self.cs(len(idRow)) + "2:" + self.cs(len(idRow)) + "3"
                 body = {
-                    "values" : [
-                        [str(user.id)],
-                        [user.nick]
+                    "valueInputOption" : "USER_ENTERED",
+                    "data" : [
+                        templates.batchValueEntry(self.currentPageName + "!" + self.cs(len(idRow)) + "2:" + self.cs(len(idRow)) + "3", [[str(user.id)], [user.nick]]),
+                        templates.batchValueEntry(self.currentPageName + "!" + self.cs(len(idRow)) + "47", [["=SUM({0}5:{0}45)".format(self.cs(len(idRow)))]]),
                     ]
                 }
-                reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
+                reply = self.sheet.values().batchUpdate(spreadsheetId=self.spreadsheetId, body=body).execute()
+
                 idx = len(idRow)
+                self.updateColumnColor(idx)
             return(idx)
             
     
@@ -248,6 +255,23 @@ class Points(commands.Cog):
                         self.currentPageId = props["sheetId"]
                         self.currentPageName = props["title"]
                     return
+
+
+    def updateColumnColor(self, col):
+        if(not self.sheet == None):
+            color = self.COLORS[(col-2)%len(self.COLORS)]
+            body = {
+                "requests" : [
+                    templates.backgroundColor(col, 1, 3, self.currentPageId, color),
+                    templates.backgroundColor(col, 46, 47, self.currentPageId, color)
+                ]
+            }
+
+            for i in range(0, 7):
+                body["requests"].append(templates.backgroundColor(col, 4 + (6 * i), 9 + (6 * i), self.currentPageId, color))
+
+            res = self.sheet.batchUpdate(spreadsheetId = self.spreadsheetId, body=body).execute()
+
 
     ## converts a number to the column string
     def cs(self, n):
