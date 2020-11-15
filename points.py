@@ -9,6 +9,7 @@ import datetime
 import time
 import pickle
 import os
+import traceback
 
 from apiclient import discovery
 from google.oauth2 import service_account
@@ -71,14 +72,34 @@ class Points(commands.Cog):
                 await msg.author.send("I was unable to parse your message: `{0}`.\nPlease only send the amount of points you earned and nothing else.".format(msg.clean_content))
                 return
 
+            if(self.insertIdx == 0):
+                await msg.add_reaction('❌')
+                await msg.author.send("No submission window is current open. Results can only be submitted up to an hour after the race has started.")
+
             if(await self.addToSheet(msg.author, pts)):
                 await msg.add_reaction('✅')
             else:
                 await msg.add_reaction('❌')
                 await msg.author.send("Unknown error occurred. Try again in several minutes or contact Will.")
 
-    async def addToSheet(self, name, points):
-        return(False)
+
+    ## adds points to the sheet for the given user
+    async def addToSheet(self, user, points):
+        try:
+            col = self.getAddRacer(user)
+            updateRange = self.currentPageName + "!" + self.cs(col) + str(self.insertIdx)
+            body = {
+                "values" : [
+                    [points]
+                ]
+            }
+            reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
+            return(True)
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
+            return(False)
+
 
     ## updates the trackChannel and saves to pickle, all under lock
     async def updateChannel(self, channelId):
@@ -191,11 +212,11 @@ class Points(commands.Cog):
             idx = -1
             try:
                 idx = idRow.index(str(user.id))
-                if(not tagRow[idx] == user.nickname):
+                if(not tagRow[idx] == user.nick):
                     updateRange = self.currentPageName + "!" + self.cs(idx) + "3"
                     body = {
                         "values" : [
-                            [user.nickname]
+                            [user.nick]
                         ]
                     }
                     reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
@@ -204,7 +225,7 @@ class Points(commands.Cog):
                 body = {
                     "values" : [
                         [str(user.id)],
-                        [user.nickname]
+                        [user.nick]
                     ]
                 }
                 reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
