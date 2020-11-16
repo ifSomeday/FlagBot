@@ -227,11 +227,11 @@ class Points(commands.Cog):
             idx = -1
             try:
                 idx = idRow.index(str(user.id))
-                if(not tagRow[idx] == user.nick):
+                if(not tagRow[idx] == user.display_name):
                     updateRange = self.currentPageName + "!" + self.cs(idx) + "3"
                     body = {
                         "values" : [
-                            [user.nick]
+                            [user.display_name]
                         ]
                     }
                     reply = self.sheet.values().update(spreadsheetId=self.spreadsheetId, range=updateRange, valueInputOption='RAW', body=body).execute()
@@ -239,7 +239,7 @@ class Points(commands.Cog):
                 body = {
                     "valueInputOption" : "USER_ENTERED",
                     "data" : [
-                        templates.batchValueEntry(self.currentPageName + "!" + self.cs(len(idRow)) + "2:" + self.cs(len(idRow)) + "3", [[str(user.id)], [user.nick]]),
+                        templates.batchValueEntry(self.currentPageName + "!" + self.cs(len(idRow)) + "2:" + self.cs(len(idRow)) + "3", [[str(user.id)], [user.display_name]]),
                         templates.batchValueEntry(self.currentPageName + "!" + self.cs(len(idRow)) + "47", [["=SUM({0}5:{0}45)".format(self.cs(len(idRow)))]]),
                     ]
                 }
