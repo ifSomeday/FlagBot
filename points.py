@@ -52,7 +52,7 @@ class Points(commands.Cog):
 
     @scheduler.before_loop
     async def beforeScheduler(self):
-        print("waiting...")
+        print("scheduler waiting...")
         await self.bot.wait_until_ready()
 
 

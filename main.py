@@ -14,7 +14,12 @@ if __name__ == "__main__":
         game = discord.Game("Korea Guild Bro")
         await client.change_presence(activity=game)
 
+    ## Points Tracker
     client.load_extension("points")
+
+    ## GPQ Tracker
+    if(not config.GPQ_SHEET_ID == None):
+        client.load_extension("gpq")
 
     ##run bot
     client.run(config.TOKEN)
