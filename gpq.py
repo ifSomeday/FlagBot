@@ -65,10 +65,14 @@ class GPQ(commands.Cog):
 
 
     @commands.command()
-    async def gpq(self, ctx, u : typing.Union[discord.Message, discord.TextChannel, None]):
+    async def test(self, ctx, u : typing.Union[discord.Message, discord.TextChannel, int], c : typing.Optional[int]):
         if(u):
+            msg = None
             if(isinstance(u, discord.Message)):
                 msg = u
+            elif(isinstance(u, int) and c):
+                ch = self.bot.get_channel(c)
+                msg = await ch.fetch_message(u)
             else:
                 print("Getting latest message in channel {0}".format(u.name))
                 messages = await u.history(limit=1).flatten()
