@@ -65,7 +65,8 @@ class GPQ(commands.Cog):
 
 
     @commands.command()
-    async def gpq(self, ctx, u : typing.Union[discord.Message, discord.TextChannel, None]):
+    @commands.is_owner()
+    async def gpq(self, ctx, u : typing.Union[discord.Message, discord.TextChannel, int], c : typing.Optional[int]):
         if(u):
             if(isinstance(u, discord.Message)):
                 msg = u
