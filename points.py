@@ -34,6 +34,7 @@ class Points(commands.Cog):
         self.currentPageName = None
         self.insertIdx = 0
 
+        self.VALID_SCORES = [100, 50, 40, 35, 30, 20, 10, 0]
         self.COLORS = [(0xf4, 0xcc, 0xcc), (0xfc, 0xe5, 0xcd), (0xff, 0xf2, 0xcc), (0xd9, 0xea, 0xd3), (0xd0, 0xe0, 0xe3), (0xc9, 0xda, 0xf8), (0xcf, 0xe2, 0xf3), (0xd9, 0xd2, 0xe9), (0xea, 0xd1, 0xdc),]
 
         self.loadChannel()
@@ -78,6 +79,12 @@ class Points(commands.Cog):
             if(self.insertIdx == 0):
                 await msg.add_reaction('❌')
                 await msg.author.send("No submission window is current open. Results can only be submitted up to an hour after the race has started.")
+                return
+
+            if(pts not in self.VALID_SCORES):
+                await msg.add_reaction('❌')
+                await msg.author.send("Please enter a valid score. Valid scores are: {0}.".format(", ".join([str(x) for x in self.VALID_SCORES])))
+                return
 
             if(await self.addToSheet(msg.author, pts)):
                 await msg.add_reaction('✅')
