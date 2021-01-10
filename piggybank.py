@@ -123,7 +123,7 @@ class PB(commands.Cog):
         
 
     def getInsertDay(self):
-        return(5 -5 + datetime.datetime.today().weekday())
+        return(5 + datetime.datetime.today().weekday())
 
     ## converts a number to the column string
     def cs(self, n):
