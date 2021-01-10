@@ -21,5 +21,9 @@ if __name__ == "__main__":
     if(not config.GPQ_SHEET_ID == None):
         client.load_extension("gpq")
 
+    ## Piggy Bank Tracker
+    if(not config.PB_SHEET_ID == None):
+        client.load_extension("piggybank")
+
     ##run bot
     client.run(config.TOKEN)
