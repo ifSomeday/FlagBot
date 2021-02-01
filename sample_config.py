@@ -11,3 +11,7 @@ CRED_FILE = "credentials.json"
 
 ## ID of the google sheet
 SHEET_ID = "SHEET_ID_HERE"
+
+## GPQ and Piggybank features should probably be left disabled
+PB_SHEET_ID = None
+GPQ_SHEET_ID = None
