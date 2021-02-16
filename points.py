@@ -79,7 +79,7 @@ class Points(commands.Cog):
     
     @commands.command()
     @commands.is_owner()
-    async def leaderboard(self, ch : discord.TextChannel):
+    async def leaderboard(self, ctx, ch : discord.TextChannel):
         z, idx = self.getAllRacerScores()
         embed = self.buildLeaderboardEmbed(z, idx)
         await ctx.send(embed=embed)
