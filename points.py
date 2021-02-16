@@ -23,6 +23,8 @@ class Points(commands.Cog):
         self.bot = bot
 
         self.trackChannel = 0
+        self.clearChannel = False
+        self.leaderboardChannel = 0
 
         self.fileLock = asyncio.Lock()
         self.filePath = "trackChannel.pickle"
@@ -37,7 +39,7 @@ class Points(commands.Cog):
         self.VALID_SCORES = [100, 50, 40, 35, 30, 20, 10, 0]
         self.COLORS = [(0xf4, 0xcc, 0xcc), (0xfc, 0xe5, 0xcd), (0xff, 0xf2, 0xcc), (0xd9, 0xea, 0xd3), (0xd0, 0xe0, 0xe3), (0xc9, 0xda, 0xf8), (0xcf, 0xe2, 0xf3), (0xd9, 0xd2, 0xe9), (0xea, 0xd1, 0xdc),]
 
-        self.loadChannel()
+        self.loadSettings()
         self.loadSheets()
         self.prepSchedule()
         self.getActivePage()
@@ -61,8 +63,26 @@ class Points(commands.Cog):
     @commands.command()
     @commands.is_owner()
     async def trackChannel(self, ctx, ch : discord.TextChannel):
-        await self.updateChannel(ch.id)
+        self.trackChannel = ch.id
+        await self.updateSettings()
         print("Now tracking: {0}".format(self.trackChannel))
+
+
+    ## updates the channel to post end of week leaderboard in
+    @commands.command()
+    @commands.is_owner()
+    async def leaderboardChannel(self, ctx, ch : discord.TextChannel):
+        self.leaderboardChannel = ch.id
+        await self.updateSettings()
+        print("Leaderboard: {0}".format(self.trackChannel))
+
+    
+    @commands.command()
+    @commands.is_owner()
+    async def leaderboard(self, ch : discord.TextChannel):
+        z, idx = self.getAllRacerScores()
+        embed = self.buildLeaderboardEmbed(z, idx)
+        await ctx.send(embed=embed)
 
 
     @commands.Cog.listener()
@@ -113,17 +133,28 @@ class Points(commands.Cog):
 
 
     ## updates the trackChannel and saves to pickle, all under lock
-    async def updateChannel(self, channelId):
+    async def updateSettings(self):
         async with self.fileLock:
-            self.trackChannel = channelId
             with open(self.filePath, "wb") as f:
-                pickle.dump(self.trackChannel, f)
+                pickle.dump({
+                    "trackChannel" : self.trackChannel,
+                    "clearChannel" : self.clearChannel,
+                    "leaderboardChannel" : self.leaderboardChannel
+                }, f)
+
 
     ## Not under lock because we only call this in init
-    def loadChannel(self):
+    def loadSettings(self):
         if os.path.exists(self.filePath):
             with open(self.filePath, "rb") as f:
-                self.trackChannel = pickle.load(f)
+                tmp = pickle.load(f)
+                if(isinstance(tmp, int)):
+                    self.trackChannel = tmp
+                else:
+                    self.trackChannel = tmp.setdefault("trackChannel", 0)
+                    self.clearChannel = tmp.setdefault("clearChannel", False)
+                    self.leaderboardChannel = tmp.setdefault("leaderboardChannel", 0)
+
 
     ## Load Sheets with service account
     def loadSheets(self):
@@ -180,6 +211,13 @@ class Points(commands.Cog):
 
     ## Barren for now, eventually add weekly leaderboard and stuff
     async def newWeek(self):
+
+        if(not self.leaderboardChannel == 0):
+            z, idx = self.getAllRacerScores()
+            embed = self.buildLeaderboardEmbed(z, idx)
+            ch = self.bot.get_channel(self.leaderboardChannel)
+            await ch.send(embed=embed)
+
         tomorrow = datetime.date.today() + datetime.timedelta(days = 1)
         self.duplicateTemplate(tomorrow.strftime("%m/%d"))
 
@@ -289,6 +327,51 @@ class Points(commands.Cog):
 
             res = self.sheet.batchUpdate(spreadsheetId = self.spreadsheetId, body=body).execute()
 
+
+    ## Gets the current racers weekly scores
+    def getAllRacerScores(self):
+
+        ## Get sheet
+        reply = self.sheet.values().get(spreadsheetId=self.spreadsheetId, range=self.currentPageName).execute()
+        values = reply.get("values")
+
+        ## The next 4 lines of code are a disaster
+        ## strip out the discord user name and weekly total rows
+        arr = [x[2:] for x in values if len(x) > 2 and any(s in x[1] for s in ["Discord Tag", "Weekly Total"])]
+        ## cast the scores as ints
+        arr[1] = [int(x) for x in arr[1]]
+        ## zip into a list of (username, score) tuples
+        z = list(zip(*arr))
+        ## sort by scores, high to low
+        z.sort(key=lambda x: x[1], reverse=True)
+
+        ## get the initial index of the racer for cool embed color matching
+        idx = arr[0].index(z[0][0])
+
+        return(z, idx)
+
+
+    def buildLeaderboardEmbed(self, z, idx):
+        embed = discord.Embed()
+        ##embed.set_author(name="Flag Leaderboard", url="https://docs.google.com/spreadsheets/d/{}".format(self.spreadsheetId))
+        embed.title = "Flag Leaderboard"
+        embed.set_footer(text="Scores for the week of {0}".format(self.currentPageName))
+        embed.url = "https://docs.google.com/spreadsheets/d/{}".format(self.spreadsheetId)
+        embed.color = discord.Color.from_rgb(*self.COLORS[idx % len(self.COLORS)])
+
+        ##no racers, so return
+        if(len(z) == 0):
+            return(None)
+        embed.add_field(name="Speed Demon", value="1. {0[0]} - {0[1]} points".format(z[0]), inline=False)
+        if(len(z[1:5]) > 0):
+            embed.add_field(name="Relámpago", value="{0}".format("\n".join(["{0}. {1[0]} - {1[1]} points".format(i + 2, x) for i, x in enumerate(z[1:5])])), inline=False)
+        if(len(z[5:10]) > 0):
+            embed.add_field(name="Swift Duck", value="{0}".format("\n".join(["{0}. {1[0]} - {1[1]} points".format(i + 6, x) for i, x in enumerate(z[5:10])])), inline=False)
+
+        if(hasattr(config, "EMBED_IMAGE_URL") and not config.EMBED_IMAGE_URL == None):
+            embed.set_thumbnail(url=config.EMBED_IMAGE_URL)
+
+        return(embed)
 
     ## converts a number to the column string
     def cs(self, n):
