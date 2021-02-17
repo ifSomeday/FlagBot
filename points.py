@@ -10,6 +10,7 @@ import time
 import pickle
 import os
 import traceback
+import typing
 
 from apiclient import discovery
 from google.oauth2 import service_account
@@ -80,9 +81,29 @@ class Points(commands.Cog):
     @commands.command()
     @commands.is_owner()
     async def leaderboard(self, ctx):
-        z, idx = self.getAllRacerScores()
-        embed = self.buildLeaderboardEmbed(z, idx)
+        z = self.getAllRacerScores()
+        embed = self.buildLeaderboardEmbed(z)
         await ctx.send(embed=embed)
+
+
+    @commands.command()
+    @commands.cooldown(3, 60, commands.BucketType.user)
+    async def points(self, ctx, user : typing.Optional[discord.Member]):
+        user = ctx.author if user == None else user
+        z = self.getAllRacerScores(tag=False)
+        try:
+            score = [x for x in z if int(x[0]) == user.id][0]
+        except:
+            await ctx.send("User has not recorded any scores")
+            return
+        embed = self.buildPointsEmbed(score, user, z.index(score) + 1)
+        await ctx.send(embed=embed)
+
+
+    @points.error
+    async def pointsError(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.author.send("You can only use `!points` 3 times every 60 seconds, please wait {0} seconds then try again.".format(int(error.retry_after)))
 
 
     @commands.Cog.listener()
@@ -329,7 +350,7 @@ class Points(commands.Cog):
 
 
     ## Gets the current racers weekly scores
-    def getAllRacerScores(self):
+    def getAllRacerScores(self, tag=True):
 
         ## Get sheet
         reply = self.sheet.values().get(spreadsheetId=self.spreadsheetId, range=self.currentPageName).execute()
@@ -337,27 +358,24 @@ class Points(commands.Cog):
 
         ## The next 4 lines of code are a disaster
         ## strip out the discord user name and weekly total rows
-        arr = [x[2:] for x in values if len(x) > 2 and any(s in x[1] for s in ["Discord Tag", "Weekly Total"])]
+        arr = [x[2:] for x in values if len(x) > 2 and any(s in x[1] for s in ["Discord Tag" if tag else "Discord ID", "Weekly Total"])]
         ## cast the scores as ints
         arr[1] = [int(x) for x in arr[1]]
-        ## zip into a list of (username, score) tuples
-        z = list(zip(*arr))
+        ## zip into a list of (username, score, inital index) tuples
+        z = [(*x, i) for i, x in enumerate(zip(*arr))]
         ## sort by scores, high to low
         z.sort(key=lambda x: x[1], reverse=True)
 
-        ## get the initial index of the racer for cool embed color matching
-        idx = arr[0].index(z[0][0])
-
-        return(z, idx)
+        return(z)
 
 
-    def buildLeaderboardEmbed(self, z, idx):
+    def buildLeaderboardEmbed(self, z):
         embed = discord.Embed()
         ##embed.set_author(name="Flag Leaderboard", url="https://docs.google.com/spreadsheets/d/{}".format(self.spreadsheetId))
         embed.title = "Flag Leaderboard"
         embed.set_footer(text="Scores for the week of {0}".format(self.currentPageName))
         embed.url = "https://docs.google.com/spreadsheets/d/{}".format(self.spreadsheetId)
-        embed.color = discord.Color.from_rgb(*self.COLORS[idx % len(self.COLORS)])
+        embed.color = discord.Color.from_rgb(*self.COLORS[z[0][2] % len(self.COLORS)])
 
         ##no racers, so return
         if(len(z) == 0):
@@ -370,6 +388,22 @@ class Points(commands.Cog):
 
         if(hasattr(config, "EMBED_IMAGE_URL") and not config.EMBED_IMAGE_URL == None):
             embed.set_thumbnail(url=config.EMBED_IMAGE_URL)
+
+        return(embed)
+
+
+    def buildPointsEmbed(self, score, user, place):
+        embed = discord.Embed()
+        embed.title = "Points for {0}".format(user.display_name)
+        embed.set_footer(text="Points for the week of {0}".format(self.currentPageName))
+        embed.url = "https://docs.google.com/spreadsheets/d/{}".format(self.spreadsheetId)
+        embed.color = discord.Color.from_rgb(*self.COLORS[score[2] % len(self.COLORS)])
+
+        ##lmao
+        embed.add_field(name="Place", value="{0}{1}".format(place, 'trnshddt'[0xc0006c000000006c>>2*place&3::4]))
+        embed.add_field(name="Points", value=score[1])
+
+        embed.set_thumbnail(url = user.avatar_url)
 
         return(embed)
 
