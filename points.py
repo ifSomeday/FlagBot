@@ -234,8 +234,8 @@ class Points(commands.Cog):
     async def newWeek(self):
 
         if(not self.leaderboardChannel == 0):
-            z, idx = self.getAllRacerScores()
-            embed = self.buildLeaderboardEmbed(z, idx)
+            z = self.getAllRacerScores()
+            embed = self.buildLeaderboardEmbed(z)
             ch = self.bot.get_channel(self.leaderboardChannel)
             await ch.send(embed=embed)
 
