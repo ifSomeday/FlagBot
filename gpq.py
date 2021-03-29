@@ -42,19 +42,22 @@ class GPQ(commands.Cog):
     @tasks.loop(seconds=300)
     async def reactLoop(self):
         if(self.gpqMessage):
-            ch = self.bot.get_channel(self.gpqMessage["ch"])
-            msg = await ch.fetch_message(self.gpqMessage["id"])
-            for reaction in msg.reactions:
-                users = await reaction.users().flatten()
-                if(reaction.emoji == "✅"):
-                    await self.updateSheet(users)
-                elif(reaction.emoji == "❌"):
-                    pass ## Not doing anything special for this right now
-                else:
-                    try:
-                        await reaction.clear()
-                    except:
-                        pass ## Didn't have permissions probably
+            try:
+                ch = self.bot.get_channel(self.gpqMessage["ch"])
+                msg = await ch.fetch_message(self.gpqMessage["id"])
+                for reaction in msg.reactions:
+                    users = await reaction.users().flatten()
+                    if(reaction.emoji == "✅"):
+                        await self.updateSheet(users)
+                    elif(reaction.emoji == "❌"):
+                        pass ## Not doing anything special for this right now
+                    else:
+                        try:
+                            await reaction.clear()
+                        except:
+                            pass ## Didn't have permissions probably
+            except:
+                pass
 
 
 
@@ -66,7 +69,7 @@ class GPQ(commands.Cog):
 
     @commands.command()
     @commands.is_owner()
-    async def gpq(self, ctx, u : typing.Union[discord.Message, discord.TextChannel, int], c : typing.Optional[int]):
+    async def gpq(self, ctx, u : typing.Union[discord.Message, discord.TextChannel, int, None], c : typing.Optional[int]):
         if(u):
             msg = None
             if(isinstance(u, discord.Message)):
