@@ -62,7 +62,7 @@ class Points(commands.Cog):
 
     ## updates the channel to track points in
     @commands.command()
-    @commands.is_owner()
+    @commands.has_guild_permissions(manage_guild=True)
     async def trackChannel(self, ctx, ch : discord.TextChannel):
         self.trackChannel = ch.id
         await self.updateSettings()
@@ -71,7 +71,7 @@ class Points(commands.Cog):
 
     ## updates the channel to post end of week leaderboard in
     @commands.command()
-    @commands.is_owner()
+    @commands.has_guild_permissions(manage_guild=True)
     async def leaderboardChannel(self, ctx, ch : discord.TextChannel):
         self.leaderboardChannel = ch.id
         await self.updateSettings()
@@ -79,7 +79,7 @@ class Points(commands.Cog):
 
     
     @commands.command()
-    @commands.is_owner()
+    @commands.has_guild_permissions(manage_guild=True)
     async def leaderboard(self, ctx):
         z = self.getAllRacerScores()
         embed = self.buildLeaderboardEmbed(z)
@@ -108,7 +108,8 @@ class Points(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, msg):
-        if(msg.channel.id == self.trackChannel):
+        ## you will want to save
+        if(msg.channel.id == self.trackChannel and not msg.clean_content.startswith("!") and not msg.author == self.bot.user):
             pts = 0
             try:
                 pts = int(msg.clean_content)
