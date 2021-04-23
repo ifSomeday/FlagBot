@@ -18,6 +18,15 @@ from google.oauth2 import service_account
 import config
 import templates
 
+import cv2 as cv
+import numpy as np
+import skimage.metrics as metrics
+import io
+import time
+import pytesseract as tess
+
+tess.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+
 class Points(commands.Cog):
 
     def __init__(self, bot):
@@ -40,6 +49,7 @@ class Points(commands.Cog):
         self.VALID_SCORES = [100, 50, 40, 35, 30, 20, 10, 0]
         self.COLORS = [(0xf4, 0xcc, 0xcc), (0xfc, 0xe5, 0xcd), (0xff, 0xf2, 0xcc), (0xd9, 0xea, 0xd3), (0xd0, 0xe0, 0xe3), (0xc9, 0xda, 0xf8), (0xcf, 0xe2, 0xf3), (0xd9, 0xd2, 0xe9), (0xea, 0xd1, 0xdc),]
 
+        self.loadAssets()
         self.loadSettings()
         self.loadSheets()
         self.prepSchedule()
@@ -109,31 +119,164 @@ class Points(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, msg):
         ## you will want to save
-        if(msg.channel.id == self.trackChannel and not msg.clean_content.startswith("!") and not msg.author == self.bot.user):
-            pts = 0
-            try:
-                pts = int(msg.clean_content)
-            except:
-                await msg.add_reaction('❌')
-                await msg.author.send("I was unable to parse your message: `{0}`.\nPlease only send the amount of points you earned and nothing else.".format(msg.clean_content))
-                return
+        if(not msg.clean_content.startswith("!") and not msg.author == self.bot.user):
+            if(msg.channel.id == self.trackChannel):
+                pts = 0
+                try:
+                    pts = int(msg.clean_content)
+                except:
+                    await msg.add_reaction('❌')
+                    await msg.author.send("I was unable to parse your message: `{0}`.\nPlease only send the amount of points you earned and nothing else.".format(msg.clean_content))
+                    return
 
-            if(self.insertIdx == 0):
-                await msg.add_reaction('❌')
-                await msg.author.send("No submission window is current open. Results can only be submitted up to an hour after the race has started.")
-                return
+                if(self.insertIdx == 0):
+                    await msg.add_reaction('❌')
+                    await msg.author.send("No submission window is current open. Results can only be submitted up to an hour after the race has started.")
+                    return
 
-            if(pts not in self.VALID_SCORES):
-                await msg.add_reaction('❌')
-                await msg.author.send("Please enter a valid score. Valid scores are: {0}.".format(", ".join([str(x) for x in self.VALID_SCORES])))
-                return
+                if(pts not in self.VALID_SCORES):
+                    await msg.add_reaction('❌')
+                    await msg.author.send("Please enter a valid score. Valid scores are: {0}.".format(", ".join([str(x) for x in self.VALID_SCORES])))
+                    return
 
-            if(await self.addToSheet(msg.author, pts)):
-                await msg.add_reaction('✅')
+                if(await self.addToSheet(msg.author, pts)):
+                    await msg.add_reaction('✅')
+                else:
+                    await msg.add_reaction('❌')
+                    await msg.author.send("Unknown error occurred. Try again in several minutes or contact Will.")
+            elif(msg.channel.id in [834877778573918249]):
+                for attachment in msg.attachments:
+                    await self.parseImage(attachment, msg.author)
+                    
+                   
+
+    ##Loads images at the beginning of time
+    def loadAssets(self):
+        ##place assets
+        self.places = []
+        for i in range(1, 21):
+            self.places.append(cv.imread('assets/{0}.png'.format(i),0))
+        ##select bar
+        self.selectBar = cv.imread('assets/selectBar.png',0)
+
+
+    async def parseImage(self, attachment, author):
+        ##prep
+        attach = await attachment.read()
+        ch = self.bot.get_channel(834877778573918249)
+
+        ##retrieve place
+        start = time.time()
+        num, sim, img, crop, cords = self.recognizePlace(attach)
+        end = time.time()
+
+        #Store the place image in a buffer
+        success, buffer = cv.imencode(".png", img)
+        placeBuf = io.BytesIO(buffer)
+
+        ##text
+        text, img2 = self.extractText(crop, cords)
+        textSplit = text.split()
+        print(text)
+
+        #Store the OCR image in a buffer
+        success, buffer = cv.imencode(".png", img2)
+        ocrBuf = io.BytesIO(buffer)
+
+        messageText = ""
+
+        ##len > 1 means we found IGN and place
+        if(len(textSplit) > 1):
+            ign = textSplit[0]
+            ##Sometimes we get random periods in the number, so this should strip them out
+            points = ''.join([x for x in textSplit[-1] if x.isdigit()])
+            ##Finished the race
+            if(points == "730"):
+                messageText = "I think `{0}` placed `{1}`, with {2}% certainty [{3} ms].".format(ign, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
+            ##Did not finish
             else:
-                await msg.add_reaction('❌')
-                await msg.author.send("Unknown error occurred. Try again in several minutes or contact Will.")
+                messageText = "I think `{0}` did not finish, and ended the race in place `{1}`, with {2}% certainty [{3} ms].".format(ign, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
+        ##OCR failed
+        else:
+            messageText = "Tesseract did not find a name and a place.\nI think `{0}` placed `{1}`, with {2}% certainty [{3} ms].".format(author.display_name, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
 
+        ##Send result
+        await ch.send(messageText, files=[discord.File(placeBuf, filename="place.png"), discord.File(ocrBuf, filename="ocr.png")])
+
+        
+
+    def recognizePlace(self, attach):
+        ##Convert byte arrary to cv2 image
+        img = cv.imdecode(np.asarray(bytearray(attach), dtype=np.uint8), 0)
+
+        ##Crop select bar to screenshot size if necessary
+        w = min(self.selectBar.shape[::-1][0], img.shape[::-1][0])
+        h = min(self.selectBar.shape[::-1][1], img.shape[::-1][1])
+        template = self.selectBar[0:h, 0:w]
+
+        ## look for select bar
+        res = cv.matchTemplate(img, template, cv.TM_CCOEFF)
+        minVal, maxVal, minLoc, maxLoc = cv.minMaxLoc(res)
+        crop = img.copy()[maxLoc[1]:maxLoc[1]+h, maxLoc[0]:maxLoc[0]+w]
+
+        #most likely canidate
+        num = 0
+        maxSim = 0
+        img2 = None
+        cords = ()
+
+        ##Iterate over the possible places and compare each one
+        for i in range(1, 21):
+            ##template matches each place, then runs ssim on that match to determine likelyhood
+            sim, imgTmp, cordsTmp = self.ssim(crop, self.places[i - 1])
+            ##higher sim means its more likely we got the correct place
+            if sim > maxSim:
+                maxSim = sim
+                img2 = imgTmp.copy()
+                num = i
+                cords = cordsTmp
+
+        return(num, maxSim, img2, crop, cords)
+
+    
+    ##structural similarity 
+    def ssim(self, img1, temp):
+
+        ##greyscale and w/h
+        img1 = cv.cvtColor(img1, cv.COLOR_BGR2RGB)
+        w, h = temp.shape[::-1]
+        temp = cv.cvtColor(temp, cv.COLOR_BGR2RGB)
+
+        ##find most likely canidate for palce
+        res = cv.matchTemplate(img1, temp, cv.TM_CCOEFF)
+        minVal, maxVal, minLoc, maxLoc = cv.minMaxLoc(res)
+        crop = img1[maxLoc[1]:maxLoc[1]+h, maxLoc[0]:maxLoc[0]+w]
+        cords = (maxLoc[1], maxLoc[1]+h, maxLoc[0], maxLoc[0]+w)
+
+        ##Determine likelyhood it is that place
+        sim = metrics.structural_similarity(temp, crop, multichannel=True)
+
+        ##Draw rectangle for debug
+        cv.rectangle(img1, maxLoc, (maxLoc[0] + w, maxLoc[1] + h), 255, 2)
+
+        return(sim, img1, cords)
+
+
+    #Extract text with tesseract
+    def extractText(self, img, cords):
+
+        ##Need to clean the image with thresholding for tesseract to work
+        thresh = img.copy()
+        ##zero out the place so we dont't OCR it
+        ##we arent OCRing the place number in the first place because tesseract really struggles with that font + small numbers
+        ##we also have the actual place assets from the .wz files, so template matching it is much more accurate
+        thresh[cords[0]:cords[1],cords[2]:cords[3]] = 0
+        ##190 threshold seems to work best, could use some tuning maybe
+        ##Adaptive tuning doesn't work here because the text is too small to use nearby samples
+        ret, thresh = cv.threshold(thresh,190,255,cv.THRESH_BINARY_INV) 
+        #run tesseract on the thresholded image
+        text = tess.image_to_string(thresh)
+        return(text, thresh)
 
     ## adds points to the sheet for the given user
     async def addToSheet(self, user, points):
