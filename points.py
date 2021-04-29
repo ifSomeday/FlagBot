@@ -11,6 +11,7 @@ import pickle
 import os
 import traceback
 import typing
+import re
 
 from apiclient import discovery
 from google.oauth2 import service_account
@@ -25,7 +26,7 @@ import io
 import time
 import pytesseract as tess
 
-tess.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+##tess.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 
 class Points(commands.Cog):
 
@@ -55,6 +56,8 @@ class Points(commands.Cog):
         self.prepSchedule()
         self.getActivePage()
 
+        self.scoreMatch = r"(?:(\d+) (\w+) ([\d,.]+))"
+
         print("Currently tracking points in channel id: {0}".format(self.trackChannel))
 
         self.scheduler.start()
@@ -72,7 +75,7 @@ class Points(commands.Cog):
 
     ## updates the channel to track points in
     @commands.command()
-    @commands.has_guild_permissions(manage_guild=True)
+    @commands.check_any(commands.has_guild_permissions(manage_guild=True), commands.is_owner())
     async def trackChannel(self, ctx, ch : discord.TextChannel):
         self.trackChannel = ch.id
         await self.updateSettings()
@@ -81,7 +84,7 @@ class Points(commands.Cog):
 
     ## updates the channel to post end of week leaderboard in
     @commands.command()
-    @commands.has_guild_permissions(manage_guild=True)
+    @commands.check_any(commands.has_guild_permissions(manage_guild=True), commands.is_owner())
     async def leaderboardChannel(self, ctx, ch : discord.TextChannel):
         self.leaderboardChannel = ch.id
         await self.updateSettings()
@@ -89,7 +92,7 @@ class Points(commands.Cog):
 
     
     @commands.command()
-    @commands.has_guild_permissions(manage_guild=True)
+    @commands.check_any(commands.has_guild_permissions(manage_guild=True), commands.is_owner())
     async def leaderboard(self, ctx):
         z = self.getAllRacerScores()
         embed = self.buildLeaderboardEmbed(z)
@@ -121,10 +124,30 @@ class Points(commands.Cog):
         ## you will want to save
         if(not msg.clean_content.startswith("!") and not msg.author == self.bot.user):
             if(msg.channel.id == self.trackChannel):
-                pts = 0
-                try:
-                    pts = int(msg.clean_content)
-                except:
+
+                points = 0
+                reply = ""
+                numMsg = self.getMsgPoints(msg.clean_content)
+
+                if(len(msg.attachments) > 0):
+                    place, sim, ign, flagPts, placeBuf, ocrBuf = await self.parseImage(msg.attachments[0])
+                    if(not flagPts == None):
+                        num = 10 if not flagPts in ["730", "720"] else ((100, 50, 40, 35, 30)[place - 1 ] if place <= 5 else 20)
+
+                        if((not numMsg == -1) and (not numMsg == num)):
+                            points = numMsg
+                            reply = "Mismatch between reported `{0}` and actual `{1}`. Recorded `{2}`.".format(numMsg, num, points)
+                        else:
+                            points = num
+                            reply = "Recorded `{0}`.".format(points)
+                            if(sim < 0.95):
+                                reply += " If this score is incorrect, please post the correct score."
+                    else:
+                        points = numMsg
+                else:
+                    points = numMsg
+
+                if(points == -1):
                     await msg.add_reaction('❌')
                     await msg.author.send("I was unable to parse your message: `{0}`.\nPlease only send the amount of points you earned and nothing else.".format(msg.clean_content))
                     return
@@ -134,21 +157,37 @@ class Points(commands.Cog):
                     await msg.author.send("No submission window is current open. Results can only be submitted up to an hour after the race has started.")
                     return
 
-                if(pts not in self.VALID_SCORES):
+                if(points not in self.VALID_SCORES):
                     await msg.add_reaction('❌')
                     await msg.author.send("Please enter a valid score. Valid scores are: {0}.".format(", ".join([str(x) for x in self.VALID_SCORES])))
                     return
 
-                if(await self.addToSheet(msg.author, pts)):
+                if(await self.addToSheet(msg.author, points)):
                     await msg.add_reaction('✅')
+                    if(not reply == ""):
+                        await msg.reply(reply)
                 else:
                     await msg.add_reaction('❌')
                     await msg.author.send("Unknown error occurred. Try again in several minutes or contact Will.")
-            elif(msg.channel.id in [834877778573918249]):
-                for attachment in msg.attachments:
-                    await self.parseImage(attachment, msg.author)
+            elif(msg.channel.id in [834876019940917278, 641483284244725776]):
+                if(not "rank" in msg.clean_content):
+                    for attachment in msg.attachments:
+                        place, sim, ign, pts, placeBuf, ocrBuf = await self.parseImage(attachment)
+                        if not ign == None:
+                            await msg.reply("Detected {0} - {1} - {2} [{3}]".format(place, ign, pts, sim), files=[discord.File(placeBuf, filename="place.png"), discord.File(ocrBuf, filename="ocr.png")])
+                else:
+                    for attachment in msg.attachments:
+                        await self.parseTopTenImage(attachment, msg)
                     
                    
+
+    def getMsgPoints(self, text):
+        try:
+            pts = int(text)
+            return(pts)
+        except:
+            return(-1)
+
 
     ##Loads images at the beginning of time
     def loadAssets(self):
@@ -158,9 +197,85 @@ class Points(commands.Cog):
             self.places.append(cv.imread('assets/{0}.png'.format(i),0))
         ##select bar
         self.selectBar = cv.imread('assets/selectBar.png',0)
+        self.rockUI = cv.imread('assets/backgrnd2.png', 0)
+
+    async def parseTopTenImage(self, attachment, msg):
+        attach  = await attachment.read()
+        img = cv.imdecode(np.asarray(bytearray(attach), dtype=np.uint8), 0)
+
+        w = min(self.rockUI.shape[::-1][0], img.shape[::-1][0])
+        h = min(self.rockUI.shape[::-1][1], img.shape[::-1][1])
+
+        template = self.rockUI.copy()[0:h, 0:w]
+
+        res = cv.matchTemplate(img, template, cv.TM_CCOEFF)
+        minVal, maxVal, minLoc, maxLoc = cv.minMaxLoc(res)
+        crop = img.copy()[maxLoc[1]:maxLoc[1]+h, maxLoc[0]:maxLoc[0]+w]
+
+        thresh = cv.medianBlur(crop, 1)
+        thresh = thresh.copy()[85:335, 40:290] ##hardcoded LOL
+        ret, thresh = cv.threshold(thresh, 105, 255, cv.THRESH_BINARY_INV) 
+        thresh = cv.resize(thresh, (thresh.shape[1] * 2, thresh.shape[0] * 2), interpolation = cv.INTER_CUBIC)
+
+        success, buffer = cv.imencode(".png", thresh)
+        threshBuf = io.BytesIO(buffer)
+
+        text = tess.image_to_string(thresh)
+
+        ret, resp, scoreList = self.extractRanks(text)
+
+        if(not scoreList == None):
+            db = self.bot.get_cog('DB')
+            if(not db == None and not self.insertIdx == 0):
+                await db.addWorldRank(scoreList, self.insertIdx)
+
+        if(ret):
+            await msg.reply(resp)
+        else:
+            await msg.reply(resp, files=[discord.File(threshBuf, filename="place.png")])
+
+    def isInt(self, num):
+        try:
+            int(num)
+        except:
+            return(False)
+        return(True)
 
 
-    async def parseImage(self, attachment, author):
+    def extractRanks(self, text):
+        scoreList = re.findall(self.scoreMatch, text)
+        response = ""
+        ## Best case scenario our regex works
+        if(len(scoreList) == 10):
+            response = "[1] Found scores:\n```{0}```".format("\n".join(["{0} - {1} - {2}".format(*x) for x in scoreList]))
+            return(True, response, scoreList)
+        ## Start fallback methods
+        else:
+            text2 = text.replace("Rank", "").replace("Guild", "").replace("Score", "").replace(".", "").strip()
+            scoreList2 = text2.split()
+
+            ##Text splitting got 30 entries
+            if(len(scoreList2) == 30):
+                scoreTuple = list(zip(scoreList2[0:10], scoreList2[10:20], scoreList2[20:30]))
+                if(all(self.isInt(x[0]) and self.isInt(x[2].replace(",", "")) for x in scoreTuple)):
+                    response = "[2] Found scores:\n```{0}```".format("\n".join(["{0} - {1} - {2}".format(*x) for x in scoreTuple]))
+                    return(True, response, scoreTuple)
+
+            ##Original scoreList
+            if(len(scoreList > 0)):
+                response = "[3] Found scores:\n```{0}```".format("\n".join(["{0} - {1} - {2}".format(*x) for x in scoreList]))
+                return(False, response, scoreList)
+
+            ##Text 
+            if(len(scoreList2) % 3 == 0):
+                scoreTuple = list(zip(scoreList2[0:10], scoreList2[10:20], scoreList[20:30]))
+                response = "[4] Found scores:\n```{0}```".format("\n".join(["{0} - {1} - {2}".format(*x) for x in scoreTuple]))
+                return(False, response, scoreTuple)
+
+        return(False, "Unable to retreive scores.\nOCR data: ```{0}```".format(text), None)
+
+
+    async def parseImage(self, attachment):
         ##prep
         attach = await attachment.read()
         ch = self.bot.get_channel(834877778573918249)
@@ -190,18 +305,20 @@ class Points(commands.Cog):
             ign = textSplit[0]
             ##Sometimes we get random periods in the number, so this should strip them out
             points = ''.join([x for x in textSplit[-1] if x.isdigit()])
+            return(num, sim, ign, points, placeBuf, ocrBuf)
             ##Finished the race
-            if(points == "730"):
-                messageText = "I think `{0}` placed `{1}`, with {2}% certainty [{3} ms].".format(ign, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
+            ##if(points == "730"):
+            ##    messageText = "I think `{0}` placed `{1}`, with {2}% certainty [{3} ms].".format(ign, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
             ##Did not finish
-            else:
-                messageText = "I think `{0}` did not finish, and ended the race in place `{1}`, with {2}% certainty [{3} ms].".format(ign, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
+            ##else:
+            ##    messageText = "I think `{0}` did not finish, and ended the race in place `{1}`, with {2}% certainty [{3} ms].".format(ign, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
         ##OCR failed
         else:
-            messageText = "Tesseract did not find a name and a place.\nI think `{0}` placed `{1}`, with {2}% certainty [{3} ms].".format(author.display_name, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
+            return(num, sim, None, None, None, None)
+            ##messageText = "Tesseract did not find a name and a place.\nI think `{0}` placed `{1}`, with {2}% certainty [{3} ms].".format(author.display_name, num, round(sim*100, 2), round((end-start) * 1000.0, 2))
 
         ##Send result
-        await ch.send(messageText, files=[discord.File(placeBuf, filename="place.png"), discord.File(ocrBuf, filename="ocr.png")])
+        ##await ch.send(messageText)
 
         
 
