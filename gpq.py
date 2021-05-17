@@ -51,6 +51,8 @@ class GPQ(commands.Cog):
                         await self.updateSheet(users)
                     elif(reaction.emoji == "❌"):
                         pass ## Not doing anything special for this right now
+                    elif(reaction.emoji == "❔"):
+                        pass ## Not doing anything special for this right now
                     else:
                         try:
                             await reaction.clear()
