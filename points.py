@@ -25,6 +25,7 @@ import skimage.metrics as metrics
 import io
 import time
 import pytesseract as tess
+import hashlib
 
 ##tess.pytesseract.tesseract_cmd = r"C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 
@@ -81,6 +82,30 @@ class Points(commands.Cog):
         await self.updateSettings()
         print("Now tracking: {0}".format(self.trackChannel))
 
+    
+    @commands.command()
+    @commands.is_owner()
+    async def md5test(self, ctx):
+        msg1 = await ctx.channel.fetch_message(839385941625143307)
+        msg2 = await ctx.channel.fetch_message(839277381797675039)
+        attachment1Hash = hashlib.md5(await msg1.attachments[0].read()).hexdigest()
+        attachment2Hash = hashlib.md5(await msg2.attachments[0].read()).hexdigest()
+        await ctx.send("Attachments are{0}equal\n```{1}```\n```{2}```".format(" " if attachment1Hash == attachment2Hash else " not ", attachment1Hash, attachment2Hash))
+
+
+    @commands.command()
+    @commands.is_owner()
+    async def grank(self, ctx):
+        embed = await self.buildWorldRankEmbed()
+        await ctx.send(embed=embed)
+
+    @commands.command()
+    @commands.is_owner()
+    async def deleteLastRace(self, ctx):
+        db = self.bot.get_cog('DB')
+        if(not db == None):
+            await db.deleteLastRace()
+            await ctx.reply("done.")
 
     ## updates the channel to post end of week leaderboard in
     @commands.command()
@@ -109,6 +134,7 @@ class Points(commands.Cog):
         except:
             await ctx.send("User has not recorded any scores")
             return
+        print(score)
         embed = self.buildPointsEmbed(score, user, z.index(score) + 1)
         await ctx.send(embed=embed)
 
@@ -262,7 +288,7 @@ class Points(commands.Cog):
                     return(True, response, scoreTuple)
 
             ##Original scoreList
-            if(len(scoreList > 0)):
+            if(len(scoreList)> 0):
                 response = "[3] Found scores:\n```{0}```".format("\n".join(["{0} - {1} - {2}".format(*x) for x in scoreList]))
                 return(False, response, scoreList)
 
@@ -629,6 +655,32 @@ class Points(commands.Cog):
 
         return(z)
 
+
+    async def buildWorldRankEmbed(self):
+        db = self.bot.get_cog('DB')
+        if(not db == None):
+            print("here")
+            ret = await db.getLatestDifferential()
+            embed = discord.Embed()
+            embed.title = "Guild Rankings"
+            embed.set_footer(text="WIP")
+            embed.url = "http://lostara.com"
+            embed.color = discord.Color.dark_purple()
+            guildEntries = []
+            namePad = max(len(x[0]) for x in ret)
+            numberPad = max(len(str(x[1])) for x in ret)
+            print(namePad)
+            for guild in ret:
+                entry = ""
+                if(guild[4] == None):
+                    entry = "{0: <3} {1: <{width}} - {2: >{width2}}".format(str(guild[3])+".", guild[0], guild[1], width=namePad, width2=numberPad)
+                else:
+                    ##emoji = "🔽" if guild[4] > 1  else "🔼"
+                    entry = "{0: <3} {1: <{width}} - {2: >{width2}} (+{3})".format(str(guild[3])+".", guild[0], guild[1], guild[2], width=namePad, width2=numberPad)
+                guildEntries.append(entry)
+            embed.add_field(name="Top 10", value="```{0}```".format("\n".join(guildEntries)))
+            return(embed)
+            
 
     def buildLeaderboardEmbed(self, z):
         embed = discord.Embed()
