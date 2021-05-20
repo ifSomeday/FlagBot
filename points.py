@@ -94,10 +94,21 @@ class Points(commands.Cog):
 
 
     @commands.command()
-    @commands.is_owner()
+    @commands.cooldown(1, 60, commands.BucketType.user)
     async def grank(self, ctx):
+        print(self.getLastRace())
         embed = await self.buildWorldRankEmbed()
         await ctx.send(embed=embed)
+
+    @grank.error
+    async def grankError(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.author.send("You can only use `!grank` once every 60 seconds, please wait {0} seconds then try again.".format(int(error.retry_after)))
+        elif isinstance(error, IndexError):
+            await ctx.author.send("There have been no ranks entered today. This is being working on, but `grank` can only be used after ranks have been entered.")
+        else:
+            print(error)
+            traceback.print_exc()
 
     @commands.command()
     @commands.is_owner()
@@ -150,51 +161,56 @@ class Points(commands.Cog):
         ## you will want to save
         if(not msg.clean_content.startswith("!") and not msg.author == self.bot.user):
             if(msg.channel.id == self.trackChannel):
+                if(msg.clean_content == "rank"):
+                    for attachment in msg.attachments:
+                        await self.parseTopTenImage(attachment, msg)    
+                        embed = await self.buildWorldRankEmbed()
+                        await msg.channel.send(embed=embed)                                 
+                else:
+                    points = 0
+                    reply = ""
+                    numMsg = self.getMsgPoints(msg.clean_content)
 
-                points = 0
-                reply = ""
-                numMsg = self.getMsgPoints(msg.clean_content)
+                    if(len(msg.attachments) > 0):
+                        place, sim, ign, flagPts, placeBuf, ocrBuf = await self.parseImage(msg.attachments[0])
+                        if(not flagPts == None):
+                            num = 10 if not flagPts in ["730", "720"] else ((100, 50, 40, 35, 30)[place - 1 ] if place <= 5 else 20)
 
-                if(len(msg.attachments) > 0):
-                    place, sim, ign, flagPts, placeBuf, ocrBuf = await self.parseImage(msg.attachments[0])
-                    if(not flagPts == None):
-                        num = 10 if not flagPts in ["730", "720"] else ((100, 50, 40, 35, 30)[place - 1 ] if place <= 5 else 20)
-
-                        if((not numMsg == -1) and (not numMsg == num)):
-                            points = numMsg
-                            reply = "Mismatch between reported `{0}` and actual `{1}`. Recorded `{2}`.".format(numMsg, num, points)
+                            if((not numMsg == -1) and (not numMsg == num)):
+                                points = numMsg
+                                reply = "Mismatch between reported `{0}` and actual `{1}`. Recorded `{2}`.".format(numMsg, num, points)
+                            else:
+                                points = num
+                                reply = "Recorded `{0}`.".format(points)
+                                if(sim < 0.95):
+                                    reply += " If this score is incorrect, please post the correct score."
                         else:
-                            points = num
-                            reply = "Recorded `{0}`.".format(points)
-                            if(sim < 0.95):
-                                reply += " If this score is incorrect, please post the correct score."
+                            points = numMsg
                     else:
                         points = numMsg
-                else:
-                    points = numMsg
 
-                if(points == -1):
-                    await msg.add_reaction('❌')
-                    await msg.author.send("I was unable to parse your message: `{0}`.\nPlease only send the amount of points you earned and nothing else.".format(msg.clean_content))
-                    return
+                    if(points == -1):
+                        await msg.add_reaction('❌')
+                        await msg.author.send("I was unable to parse your message: `{0}`.\nPlease only send the amount of points you earned and nothing else.".format(msg.clean_content))
+                        return
 
-                if(self.insertIdx == 0):
-                    await msg.add_reaction('❌')
-                    await msg.author.send("No submission window is current open. Results can only be submitted up to an hour after the race has started.")
-                    return
+                    if(self.insertIdx == 0):
+                        await msg.add_reaction('❌')
+                        await msg.author.send("No submission window is current open. Results can only be submitted up to an hour after the race has started.")
+                        return
 
-                if(points not in self.VALID_SCORES):
-                    await msg.add_reaction('❌')
-                    await msg.author.send("Please enter a valid score. Valid scores are: {0}.".format(", ".join([str(x) for x in self.VALID_SCORES])))
-                    return
+                    if(points not in self.VALID_SCORES):
+                        await msg.add_reaction('❌')
+                        await msg.author.send("Please enter a valid score. Valid scores are: {0}.".format(", ".join([str(x) for x in self.VALID_SCORES])))
+                        return
 
-                if(await self.addToSheet(msg.author, points)):
-                    await msg.add_reaction('✅')
-                    if(not reply == ""):
-                        await msg.reply(reply)
-                else:
-                    await msg.add_reaction('❌')
-                    await msg.author.send("Unknown error occurred. Try again in several minutes or contact Will.")
+                    if(await self.addToSheet(msg.author, points)):
+                        await msg.add_reaction('✅')
+                        if(not reply == ""):
+                            await msg.reply(reply)
+                    else:
+                        await msg.add_reaction('❌')
+                        await msg.author.send("Unknown error occurred. Try again in several minutes or contact Will.")
             elif(msg.channel.id in [834876019940917278, 641483284244725776]):
                 if(not "rank" in msg.clean_content):
                     for attachment in msg.attachments:
@@ -203,7 +219,7 @@ class Points(commands.Cog):
                             await msg.reply("Detected {0} - {1} - {2} [{3}]".format(place, ign, pts, sim), files=[discord.File(placeBuf, filename="place.png"), discord.File(ocrBuf, filename="ocr.png")])
                 else:
                     for attachment in msg.attachments:
-                        await self.parseTopTenImage(attachment, msg)
+                        await self.parseTopTenImage(attachment, msg, post=True)
                     
                    
 
@@ -225,7 +241,7 @@ class Points(commands.Cog):
         self.selectBar = cv.imread('assets/selectBar.png',0)
         self.rockUI = cv.imread('assets/backgrnd2.png', 0)
 
-    async def parseTopTenImage(self, attachment, msg):
+    async def parseTopTenImage(self, attachment, msg, post=False):
         attach  = await attachment.read()
         img = cv.imdecode(np.asarray(bytearray(attach), dtype=np.uint8), 0)
 
@@ -252,13 +268,16 @@ class Points(commands.Cog):
 
         if(not scoreList == None):
             db = self.bot.get_cog('DB')
-            if(not db == None and not self.insertIdx == 0):
-                await db.addWorldRank(scoreList, self.insertIdx)
-
-        if(ret):
-            await msg.reply(resp)
+            if(not db == None):
+                await db.addWorldRank(scoreList, self.getLastRace())
         else:
-            await msg.reply(resp, files=[discord.File(threshBuf, filename="place.png")])
+            msg.reply("Unable to read scores, please try again with a new screenshot.")
+
+        if(post):
+            if(ret):
+                await msg.reply(resp)
+            else:
+                await msg.reply(resp, files=[discord.File(threshBuf, filename="place.png")])
 
     def isInt(self, num):
         try:
@@ -506,6 +525,33 @@ class Points(commands.Cog):
             self.insertIdx = 0
 
 
+    ## gets the last submission window for submitting late scores
+    def getLastRace(self):
+
+        ##get current hour
+        currHour = int(datetime.datetime.now().strftime("%H"))
+        dst = time.localtime().tm_isdst
+
+        ##race times
+        indices = {
+                4  + dst : 0,
+                11 + dst : 1,
+                13 + dst : 2,
+                14 + dst : 3,
+                15 + dst : 4
+            }
+
+        ##go backwards until we find a valid race
+        while currHour not in indices:
+            currHour -= 1
+            if currHour < 0:
+                currHour = 24
+                
+        ##add 5 per weekday past
+        race = indices[currHour] + (5 * datetime.datetime.today().weekday())
+        return(race)        
+
+
     ## Updates the active submission window
     async def updateSubmissionWindow(self, t=None):
         print("I am updating Submission Window")
@@ -663,8 +709,8 @@ class Points(commands.Cog):
             ret = await db.getLatestDifferential()
             embed = discord.Embed()
             embed.title = "Guild Rankings"
-            embed.set_footer(text="WIP")
-            embed.url = "http://lostara.com"
+            embed.url = "https://flag.lostara.com"
+            embed.set_footer(text="willmrice.com", icon_url="https://flag.lostara.com/gwenhwyfar.gif")
             embed.color = discord.Color.dark_purple()
             guildEntries = []
             namePad = max(len(x[0]) for x in ret)
