@@ -7,6 +7,8 @@ import config
 import asyncio
 import typing
 import re
+import traceback
+from enum import Enum
 from collections import OrderedDict
 
 from apiclient import discovery
@@ -48,19 +50,20 @@ class GPQ(commands.Cog):
                 for reaction in msg.reactions:
                     users = await reaction.users().flatten()
                     if(reaction.emoji == "✅"):
-                        await self.updateSheet(users)
+                        await self.updateSheet(users, self.Attendance.YES)
                     elif(reaction.emoji == "❌"):
-                        pass ## Not doing anything special for this right now
+                        await self.updateSheet(users, self.Attendance.NO)
                     elif(reaction.emoji == "❔"):
-                        pass ## Not doing anything special for this right now
+                        await self.updateSheet(users, self.Attendance.MAYBE)
                     else:
                         try:
                             await reaction.clear()
                         except:
                             pass ## Didn't have permissions probably
-            except:
-                pass
-
+            except Exception as e:
+                print(e)
+                traceback.print_exc()
+                
 
 
     @reactLoop.before_loop
@@ -121,7 +124,7 @@ class GPQ(commands.Cog):
 
 
     ## updates the sheet based on the latest reactions
-    async def updateSheet(self, users):
+    async def updateSheet(self, users, attendance):
 
         self.getActivePage()
         self.getNicknamePage()
@@ -137,7 +140,7 @@ class GPQ(commands.Cog):
                 arr.append([nicks[str(user.id)]])
 
         self.updateNicknameMapping(list(nicks.items()))
-        self.updateAttending(arr)
+        self.updateAttendance(arr, attendance)
 
 
     ## Gets the Nickname page, and if it does not exist, creates it
@@ -210,9 +213,9 @@ class GPQ(commands.Cog):
 
 
     ## Clears the attending column, then adds back everyone that is still attending
-    def updateAttending(self, v):
+    def updateAttendance(self, v, attendance):
         if(not self.sheet == None):
-            r1 = "{0}!Z3:Z".format(self.currentPageName)
+            r1 = "{0}!{1}3:{1}".format(self.currentPageName, attendance.value)
             body = {
                 "values" : v
             }
@@ -241,6 +244,12 @@ class GPQ(commands.Cog):
             n, r = divmod(n - 1, 26)
             s = chr(65 + r) + s
         return(s)
+
+    class Attendance(Enum):
+        YES = 'Z'
+        NO = 'AC'
+        MAYBE = 'AE'
+         
 
 def setup(bot):
     bot.add_cog(GPQ(bot))
