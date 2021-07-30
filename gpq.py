@@ -73,7 +73,7 @@ class GPQ(commands.Cog):
 
 
     @commands.command()
-    @commands.is_owner()
+    @commands.check_any(commands.has_guild_permissions(manage_guild=True), commands.is_owner())
     async def gpq(self, ctx, u : typing.Union[discord.Message, discord.TextChannel, int, None], c : typing.Optional[int]):
         if(u):
             msg = None
