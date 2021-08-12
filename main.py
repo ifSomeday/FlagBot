@@ -17,6 +17,7 @@ if __name__ == "__main__":
     ## Points Tracker
     client.load_extension("points")
     client.load_extension("serverChecker")
+    client.load_extension("flames")
 
     ## GPQ Tracker
     if(not config.GPQ_SHEET_ID == None):
