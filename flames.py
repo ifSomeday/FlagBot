@@ -8,6 +8,7 @@ import numpy as np
 import requests.api
 import difflib
 import re
+import typing
 
 """
 This is a super rudimentary flame bot
@@ -49,7 +50,7 @@ class Flames(commands.Cog):
         
 
     @commands.command()
-    async def flame(self, ctx, *text : str):
+    async def flame(self, ctx, level : int = -1):
 
         if(len(ctx.message.attachments) == 0):
             await ctx.reply("Please attach an image of an item.")
@@ -59,12 +60,13 @@ class Flames(commands.Cog):
             attach = await ctx.message.attachments[0].read()
             img = cv.imdecode(np.asarray(bytearray(attach), dtype=np.uint8), 1)
 
-            ret, flames = self.parseImage(img)
+            level 
+            ret, flames = self.parseImage(img, level=level)
             if(ret):
                 emb = self.buildFlameEmbed(flames)
                 await ctx.reply("", embed=emb)
             else:
-                pass
+                await ctx.reply(flames)
 
     
     def buildFlameEmbed(self, flames):
@@ -80,7 +82,7 @@ class Flames(commands.Cog):
             emb.add_field(name="Possible Flames", value="\n".join(flamesText))
         return(emb)
 
-    def parseImage(self, img):
+    def parseImage(self, img, level = -1):
 
         print(img.shape)
         imgGrey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
@@ -89,6 +91,8 @@ class Flames(commands.Cog):
         cleanedGrey = self.cleanImage(imgGrey)
         cleanedFlame = self.cleanFlame(img)
         cleanedLevel = self.cleanLevel(img)
+
+        cv.imwrite("cleanedFlame.png", cleanedFlame)
 
         levelFrame = tess.image_to_data(cleanedLevel, output_type=tess.Output.DATAFRAME)
         croppedLevel = self.cropLevel(cleanedLevel, levelFrame)
@@ -110,6 +114,8 @@ class Flames(commands.Cog):
         croppedStats = cleaned.copy()[statsTopLeft[0]:,:]
         croppedFlameStats = cleanedFlame.copy()[statsTopLeft[0]:,:]
 
+        cv.imwrite("croppedFlameStats.png", croppedFlameStats)
+
         ##Crop stats
         statData = tess.image_to_data(croppedStats, output_type=tess.Output.DICT)
         statFrame = tess.image_to_data(croppedStats, output_type=tess.Output.DATAFRAME)
@@ -119,6 +125,7 @@ class Flames(commands.Cog):
         flameData = tess.image_to_data(croppedFlameStats, output_type=tess.Output.DICT)
         flameFrame = tess.image_to_data(croppedFlameStats, output_type=tess.Output.DATAFRAME)
         flameFrame = flameFrame.copy()[~flameFrame.text.isnull()]
+        print(flameFrame["text"])
 
         ##Level Frame
         levelData = tess.image_to_data(croppedLevel, output_type=tess.Output.DICT)
@@ -131,7 +138,7 @@ class Flames(commands.Cog):
             if(re.match(r"\+(\d+)%?", row["text"])):
                 top = statFrame.loc[statFrame['top'].sub(row["top"]).abs().idxmin()]["top"]
                 statRow = statFrame.loc[(statFrame["top"] == top) & (statFrame["left"] < row["left"] - 1)]
-
+                print(" ".join(statRow["text"]))
                 statText = re.findall(r"([\w ]+)", " ".join(statRow["text"]))[0]
                 statValue = int(re.findall(r"(\d+)", row["text"])[0])
 
@@ -144,6 +151,7 @@ class Flames(commands.Cog):
 
         flameDict = {}
         baseDict = {}
+        print(flames)
         for flame in flames:
             stat = difflib.get_close_matches(flame[0].lower(), self.statMap.keys())
             flameDict[self.statMap[stat[0]]] = flame[1]
@@ -151,21 +159,27 @@ class Flames(commands.Cog):
         
 
         levelText = [x for x in levelData["text"] if not x == ""]
-        level = 0
+        if(level == -1):
+            level = 0
+            m = difflib.get_close_matches("LEV:", levelText)
+            if(len(m) == 0):
+                print("No LEV matches")
+                return(False, "Unable to automatically determine level.\nFlame bot struggles with this, and you can manually specify the level with `!flame <level>`")
+            idx = levelText.index(m[0])
+            if(idx == len(levelText) - 1):
+                print("No numbers")
+                return(False, "Unable to automatically determine level.\nFlame bot struggles with this, and you can manually specify the level with `!flame <level>`")
+            m = re.findall(r"(\d+)", " ".join(levelText[idx:]))
+            print(" ".join(levelText[idx:]))
+            if(m):
+                level = int(m[0])
+                print("Level: {0}".format(m[0]))
+            else:
+                print("re match failed")
+                return(False, "Unable to automatically determine level.\nFlame bot struggles with this, and you can manually specify the level with `!flame <level>`")
 
-        m = difflib.get_close_matches("LEV:", levelText)
-        if(len(m) == 0):
-            print("No LEV matches")
-            return(False, "Unable to automatically determine level.\nFlame bot struggles with this, and you can manually specify the level with `!flame <level>`")
-        idx = levelText.index(m[0])
-        if(idx == len(levelText) - 1):
-            print("No numbers")
-            return(False, "Unable to automatically determine level.\nFlame bot struggles with this, and you can manually specify the level with `!flame <level>`")
-        m = re.findall(r"(\d+)", " ".join(levelText[idx:]))
-        if(m):
-            level = int(m[0])
-            print("Level: {0}".format(m[0]))
 
+        print(level, flameDict, baseDict)
         if(level != 0):
             calc = FlameCalc.FlameCalc()
             validFlames = calc.calcFlame(flameDict, baseDict, level)
@@ -181,11 +195,15 @@ class Flames(commands.Cog):
         return(img2)
 
     def cleanFlame(self, img):
-        flame = ([0, 160, 130], [20, 255, 230]) ##0, 255, 204
+        flame = ([0, 160, 130], [30, 255, 230]) ##0, 255, 204
         flameImg = img.copy()
+        #flameImg = cv.medianBlur(flameImg, 1)
         flameImg = cv.resize(flameImg, (flameImg.shape[1] * 3, flameImg.shape[0] * 3), interpolation = cv.INTER_CUBIC)
         mask = cv.inRange(flameImg, np.array(flame[0], dtype = "uint8"), np.array(flame[1], dtype = "uint8"))
         flameImg = cv.bitwise_and(flameImg, flameImg, mask=mask)
+        ret, flameImg = cv.threshold(flameImg, 127, 255, cv.THRESH_BINARY)
+        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+        flameImg = cv.filter2D(flameImg, -1, kernel)
         return(flameImg)
 
 
@@ -194,7 +212,7 @@ class Flames(commands.Cog):
         mask = cv.inRange(levelImg, np.array([0, 203, 253], dtype = "uint8"), np.array([0, 206, 255], dtype = "uint8"))
         ret, levelImg = cv.threshold(levelImg, 127, 255, cv.THRESH_BINARY)
         levelImg = cv.bitwise_and(levelImg, levelImg, mask=mask)
-        levelImg = cv.resize(levelImg, (levelImg.shape[1] * 2, levelImg.shape[0] * 2), interpolation = cv.INTER_CUBIC)
+        levelImg = cv.resize(levelImg, (levelImg.shape[1] * 3, levelImg.shape[0] * 3), interpolation = cv.INTER_CUBIC)
         return(levelImg)
 
     def cleanlevel2(self, img):
