@@ -269,6 +269,7 @@ class Points(commands.Cog):
         if(not scoreList == None):
             db = self.bot.get_cog('DB')
             if(not db == None):
+                print("adding")
                 await db.addWorldRank(scoreList, self.getLastRace())
         else:
             msg.reply("Unable to read scores, please try again with a new screenshot.")
@@ -572,8 +573,12 @@ class Points(commands.Cog):
             ch = self.bot.get_channel(self.leaderboardChannel)
             await ch.send(embed=embed)
 
+        z = self.getAllRacerScores(tag=False)
+
         tomorrow = datetime.date.today() + datetime.timedelta(days = 1)
         self.duplicateTemplate(tomorrow.strftime("%m/%d"))
+
+        await self.updateRoles(z)
 
 
     ## Duplicate template to new sheet
@@ -765,6 +770,25 @@ class Points(commands.Cog):
         embed.set_thumbnail(url = user.avatar_url)
 
         return(embed)
+
+
+    async def updateRoles(self, z):
+        ## Speed Demon 811030389095268393
+        ## relampago 794847144589656114
+        ## swift duck 810972999539884033
+        guild = self.bot.get_guild(794720132492558386)
+        roles = [guild.get_role(x) for x in [811030389095268393, 794847144589656114, 810972999539884033]]
+        
+        for i, user in enumerate(z[:10]):
+            role = roles[0] if i < 1 else (roles[1] if i < 5 else roles[2])
+            member = await guild.fetch_member(int(user[0]))
+            try:
+                print("Setting {0} to {1}".format(member.display_name, role.name))
+            except:
+                pass
+            await member.remove_roles(*roles)
+            await member.add_roles(role)
+
 
     ## converts a number to the column string
     def cs(self, n):

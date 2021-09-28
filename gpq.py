@@ -11,6 +11,9 @@ import traceback
 from enum import Enum
 from collections import OrderedDict
 
+import datetime
+import pytz
+
 from apiclient import discovery
 from google.oauth2 import service_account
 
@@ -60,6 +63,8 @@ class GPQ(commands.Cog):
                             await reaction.clear()
                         except:
                             pass ## Didn't have permissions probably
+            except discord.errors.NotFound as e:
+                pass
             except Exception as e:
                 print(e)
                 traceback.print_exc()
@@ -71,6 +76,63 @@ class GPQ(commands.Cog):
         print("reactLoop waiting...")
         await self.bot.wait_until_ready()
 
+
+    @commands.command()
+    @commands.check_any(commands.has_guild_permissions(manage_guild=True), commands.is_owner())
+    async def postGpq(self, ctx, hours : int = 3, minutes : int = 45):
+        today = datetime.date.today()
+        friday = today + datetime.timedelta( (5-today.weekday()) % 7 )
+        dt = datetime.datetime.combine(friday, datetime.time())
+
+        gpqTime = dt + datetime.timedelta(hours = hours, minutes = minutes)
+
+        pstTZ = pytz.timezone('US/Pacific')
+        pst = pytz.utc.localize(gpqTime).astimezone(pstTZ)
+
+        cstTZ = pytz.timezone('US/Central')
+        cst = pytz.utc.localize(gpqTime).astimezone(cstTZ)
+
+        estTZ = pytz.timezone('US/Eastern')
+        est = pytz.utc.localize(gpqTime).astimezone(estTZ)
+
+        bstTZ = pytz.timezone('Europe/London')
+        bst = pytz.utc.localize(gpqTime).astimezone(bstTZ)
+
+        aestTZ = pytz.timezone('Australia/Melbourne')
+        aest = pytz.utc.localize(gpqTime).astimezone(aestTZ)
+
+        gpqText = """
+<@&795087707046543370> This week's GPQ will be Friday Reset+{0}. Check below for your time zone and react if you can/can't make it.
+
+{1} {3} PST / {4} CST / {5} EST
+[ {2} {6} BST / {7} AEST ]
+
+React with :white_check_mark: if you are able to make it, :x: if you are not, :grey_question:if you don't know/want to fill.
+        """
+
+        plusTime = "{0}:{1}".format(hours, minutes)
+
+        d = int(pst.strftime("%d"))
+        d2 = int(bst.strftime("%d"))
+
+        suffix1 = 'th' if 11<=d<=13 else {1:'st',2:'nd',3:'rd'}.get(d%10, 'th')
+        weekday1 = pst.strftime("%A %B %d{0}".format(suffix1))
+        
+        suffix2 = 'th' if 11<=d2<=13 else {1:'st',2:'nd',3:'rd'}.get(d2%10, 'th')
+        weekday2 = bst.strftime("%A %B %d{0}".format(suffix2))
+
+        time1 = pst.strftime("%I:%M %p")
+        time2 = cst.strftime("%I:%M %p")
+        time3 = est.strftime("%I:%M %p")
+        time4 = bst.strftime("%I:%M %p")
+        time5 = aest.strftime("%I:%M %p")
+
+        ch = self.bot.get_channel(794753791153012788)
+        msg = await ch.send(gpqText.format(plusTime, weekday1, weekday2, time1, time2, time3,  time4, time5))
+        await self.gpq(ctx, msg, 0)
+
+
+###<@&795087707046543370>
 
     @commands.command()
     @commands.check_any(commands.has_guild_permissions(manage_guild=True), commands.is_owner())
@@ -92,6 +154,7 @@ class GPQ(commands.Cog):
             ##Add Yes and no Reactions
             await msg.add_reaction("✅")
             await msg.add_reaction("❌")
+            await msg.add_reaction("❔")
 
             await ctx.send("Tracking GPQ attendance")
 
@@ -244,6 +307,7 @@ class GPQ(commands.Cog):
             n, r = divmod(n - 1, 26)
             s = chr(65 + r) + s
         return(s)
+    
 
     class Attendance(Enum):
         YES = 'Z'

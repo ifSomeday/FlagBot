@@ -109,6 +109,7 @@ class Flames(commands.Cog):
         statsTopLeft = (0, 0)
         dataText = data["text"]
         m = difflib.get_close_matches("Type", dataText, cutoff=0.5)
+        #print(dataText)
         if(m):
             idx = dataText.index(m[0])
             statsTopLeft = (data["top"][idx], data["left"][idx])

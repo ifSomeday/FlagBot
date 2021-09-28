@@ -26,10 +26,10 @@ class DB(commands.Cog):
                 r, g, p = rank
                 r = int(r)
                 p = int(p.replace(",", "")) 
-                print("inserting {0}".format(str(rank)))
+                #print("inserting {0}".format(str(rank)))
                 cur.execute("SELECT * FROM worldrankings WHERE guild=%s AND race=%s AND date=%s;", (g, insertIdx, dt.date.today()))
                 res = cur.fetchone()
-                #print(res)
+                print(res)
                 if(res == None):
                     cur.execute("INSERT INTO worldrankings (guild, points, rank, race) VALUES (%s, %s, %s, %s);", (g, p, r, insertIdx))
                 else:
@@ -54,13 +54,13 @@ class DB(commands.Cog):
         monday = today + dt.timedelta(days=-today.weekday())
         res = []
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM (SELECT DISTINCT ON (guild) * FROM worldrankings WHERE date >= %s and race=(SELECT MAX (race) FROM worldrankings) ORDER BY guild, race DESC) t ORDER BY points DESC", (monday,))
+            cur.execute("SELECT * FROM (SELECT DISTINCT ON (guild) * FROM worldrankings WHERE date >= %s and race=(SELECT MAX (race) FROM worldrankings WHERE date=%s) ORDER BY guild, race DESC) t ORDER BY points DESC", (monday, today,))
             res = cur.fetchall()
         conn.close()
         return(res)
     
     async def deleteLastRace(self):
-        conn = dbConnect()
+        conn = self.dbConnect()
         today = dt.date.today()
         with conn.cursor() as cur:
             cur.execute("DELETE FROM worldrankings WHERE race=(SELECT MAX (race) FROM worldrankings WHERE date=%s)", (today, ))
