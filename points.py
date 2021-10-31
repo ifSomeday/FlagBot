@@ -82,16 +82,6 @@ class Points(commands.Cog):
         await self.updateSettings()
         print("Now tracking: {0}".format(self.trackChannel))
 
-    
-    @commands.command()
-    @commands.is_owner()
-    async def md5test(self, ctx):
-        msg1 = await ctx.channel.fetch_message(839385941625143307)
-        msg2 = await ctx.channel.fetch_message(839277381797675039)
-        attachment1Hash = hashlib.md5(await msg1.attachments[0].read()).hexdigest()
-        attachment2Hash = hashlib.md5(await msg2.attachments[0].read()).hexdigest()
-        await ctx.send("Attachments are{0}equal\n```{1}```\n```{2}```".format(" " if attachment1Hash == attachment2Hash else " not ", attachment1Hash, attachment2Hash))
-
 
     @commands.command()
     @commands.cooldown(1, 60, commands.BucketType.user)
