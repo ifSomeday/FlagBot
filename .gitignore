@@ -126,3 +126,5 @@ dmypy.json
 credentials*.json
 config.py
 *.pickle
+db.py
+flameTest.py

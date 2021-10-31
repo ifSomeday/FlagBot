@@ -6,6 +6,8 @@ import config
 if __name__ == "__main__":
 
     ##set up client
+    intents = discord.Intents.default()
+    intents.members = True
     client = commands.Bot(command_prefix='!')
 
     @client.event
