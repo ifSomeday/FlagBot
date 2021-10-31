@@ -127,7 +127,8 @@ class ServerChecker(commands.Cog):
 
 
     async def serverUpPing(self):
-        ch = await self.bot.fetch_channel(834175696627564567)##834175696627564567)
+        ##put channel to ping here
+        ch = await self.bot.fetch_channel(834175696627564567)
         await ch.send("{0}\nLogin servers are back online!".format(ch.guild.default_role))
 
 
