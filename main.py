@@ -22,6 +22,7 @@ if __name__ == "__main__":
     client.load_extension("db")
     client.load_extension("flames")
     client.load_extension("supremeLeader")
+    client.load_extension("tracker")
 
     ## GPQ Tracker
     if(not config.GPQ_SHEET_ID == None):
