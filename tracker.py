@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from contextlib import contextmanager
 
 import aioschedule as schedule
 import aiohttp
@@ -12,6 +13,7 @@ from psycopg2.extras import Json
 import json
 import time
 import config
+from datetime import datetime
 
 jobIds = {
     "Warrior" : 1,
@@ -157,6 +159,16 @@ class Tracker(commands.Cog):
         else:
             ctx.reply("Invalid class `{0}`".format(cl))
 
+    
+    @commands.command()
+    @commands.is_owner()
+    async def lastUpdate(self, ctx):
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(("SELECT timestamp FROM cheaters ORDER BY timestamp DESC"))
+                res = cur.fetchone()[0]
+                await ctx.reply("Last update was `{0}`".format(res.strftime("%H:%M:%S %m-%d-%Y")))
+
 
     async def compareAndSend(self, ctx, new, old):
         z = self.compare(new, old)
@@ -168,10 +180,14 @@ class Tracker(commands.Cog):
             r = "Name Change Detected!\n\tCurr: {0} - Rank {1}\n\tPrev: {2} - Rank {3}\n\tRank Differential: {4}\n\tExp Differential: {5:,} ({6}%)".format(curr["CharacterName"], curr["Rank"], prev["CharacterName"], prev["Rank"], rankDiff, expDiff, changePercent)
             await ctx.send(r)
 
+    @contextmanager
     def dbConnect(self):
         conn = psycopg2.connect(dbname=config.DB_NAME, user=config.DB_USER, password=config.DB_PASS, host=config.DB_ADDR)
         conn.set_session(autocommit=True)
-        return(conn)
+        try:
+            yield conn
+        finally:
+            conn.close()
 
     #gets the lastest rankings for all classes:
     async def getAllRankings(self):
@@ -215,23 +231,21 @@ class Tracker(commands.Cog):
     #Get n entries from database
     #n=0 gets all
     def getEntries(self, numEntries=2):
-        conn = self.dbConnect()
         res = []
-        with conn.cursor() as cur:
-            if(numEntries == 0):
-                cur.execute("SELECT * FROM cheaters ORDER BY timestamp DESC")
-            else:
-                cur.execute("SELECT * FROM cheaters ORDER BY timestamp DESC LIMIT %s", (numEntries, ))
-            res = cur.fetchall()
-        conn.close()
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                if(numEntries == 0):
+                    cur.execute("SELECT * FROM cheaters ORDER BY timestamp DESC")
+                else:
+                    cur.execute("SELECT * FROM cheaters ORDER BY timestamp DESC LIMIT %s", (numEntries, ))
+                res = cur.fetchall()
         return(res)
 
     ## Add new entry
     def addEntry(self, data):
-        conn = self.dbConnect()
-        with conn.cursor() as cur:
-            cur.execute("INSERT INTO cheaters (json) VALUES (%s)", (Json(data), ))
-        conn.close()
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO cheaters (json) VALUES (%s)", (Json(data), ))
 
     #compare two character lists, and find discrepancies 
     def compare(self, new, old):
