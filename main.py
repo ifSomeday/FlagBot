@@ -17,7 +17,7 @@ if __name__ == "__main__":
         await client.change_presence(activity=game)
 
     ## Points Tracker
-    client.load_extension("points")
+    #client.load_extension("points")
     client.load_extension("serverChecker")
     client.load_extension("db")
     client.load_extension("flames")
@@ -25,12 +25,12 @@ if __name__ == "__main__":
     client.load_extension("tracker")
 
     ## GPQ Tracker
-    if(not config.GPQ_SHEET_ID == None):
-        client.load_extension("gpq")
+    ##if(not config.GPQ_SHEET_ID == None):
+    ##    client.load_extension("gpq")
 
     ## Piggy Bank Tracker
-    if(not config.PB_SHEET_ID == None):
-        client.load_extension("piggybank")
+    ##if(not config.PB_SHEET_ID == None):
+    ##    client.load_extension("piggybank")
 
     ##run bot
     client.run(config.TOKEN)
