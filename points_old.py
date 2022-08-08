@@ -1,3 +1,6 @@
+## This is all for old flag. All new processing is done in points.py
+## This code is still here for sentimental purposes (lol)
+
 from __future__ import print_function
 
 import discord
