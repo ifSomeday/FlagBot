@@ -78,7 +78,7 @@ class ServerChecker(commands.Cog):
                 print("Server failed check #{0}".format(self.downDuration))
 
             
-    @tasks.loop(seconds=15.0)
+    @tasks.loop(seconds=30)
     async def patchNotes(self, ctx=None):
         timeout = aiohttp.ClientTimeout(total=5)
         async with aiohttp.ClientSession(timeout=timeout) as session:
