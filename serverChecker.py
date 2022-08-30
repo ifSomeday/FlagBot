@@ -1,11 +1,15 @@
 import discord
 from discord.ext import commands, tasks
 
+from bs4 import BeautifulSoup
+
 import asyncio
 import aiohttp
 import traceback
 import concurrent
 import time
+import os
+import pickle
 
 class ServerChecker(commands.Cog):
 
@@ -14,12 +18,16 @@ class ServerChecker(commands.Cog):
         self.bot = bot
 
         self.servers = [["34.215.62.60", "8484"], ["35.167.153.201", "8484"], ["52.37.193.138", "8484"]]
+        self.news = "https://maplestory.nexon.net/news/update#news-filter"
+
+        self.lastLink = None
 
         self.channels = []
 
         self.up = True
         self.downDuration = 0
         self.checker.start()
+        self.patchNotes.start()
 
     async def checkServer(self, ip, port):
         timeout = aiohttp.ClientTimeout(total=5)
@@ -70,12 +78,59 @@ class ServerChecker(commands.Cog):
                 print("Server failed check #{0}".format(self.downDuration))
 
             
+    @tasks.loop(seconds=15.0)
+    async def patchNotes(self, ctx=None):
+        timeout = aiohttp.ClientTimeout(total=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+             async with session.get(self.news) as response:
+                text = await response.text()
+                soup = BeautifulSoup(text)
+
+                featuredNews = soup.find_all("div", {"class" : "component component-featured-news"})[0]
+
+                newsList = featuredNews.find("ul").find_all("li")
+                latestNews = newsList[0]
+
+                newsLink = latestNews.find("a")["href"]
+
+                if(self.lastLink == None):
+                    self.lastLink = newsLink
+                    return
+
+                ## Verify its an update
+                latestNewsType = latestNews.find("div", {"class" : "label"}).getText().strip()
+                if(not latestNewsType == "FEATURED UPDATE"):
+                    return
+
+                ## Verify its not a preview
+                latestNewsHeader = latestNews.find("h3").find("a").getText()
+                if("preview" in latestNewsHeader.lower()):
+                    print("would skip")
+                    return
+
+                if(not self.lastLink == newsLink):
+                    self.lastLink = newsLink
+                    if(ctx == None):
+                        ch = await self.bot.fetch_channel(641483284244725776)
+                        everyone = ch.guild.default_role
+                        await ch.send("PATCH NOTES OUT {1}\n{0}".format("https://maplestory.nexon.net{0}".format(newsLink), everyone))
+                    else:
+                        await ctx.reply("PATCH NOTES OUT\n{0}".format("https://maplestory.nexon.net{0}".format(newsLink)))
+                    
+
+
     @checker.before_loop
     async def before_checker(self):
         print("Checker waiting for bot.")
         await self.bot.wait_until_ready()
         print("Checker ready")
 
+
+    @patchNotes.before_loop
+    async def before_patchNotes(self):
+        print("patchNotes waiting for bot.")
+        await self.bot.wait_until_ready()
+        print("patchNotes ready")
 
     async def serverUpPing(self):
         for chId in [794756750472773632]:
@@ -89,11 +144,17 @@ class ServerChecker(commands.Cog):
 
     @commands.command()
     @commands.is_owner()
+    async def news(self, ctx):
+        await self.patchNotes(ctx=ctx)
+
+    @commands.command()
+    @commands.is_owner()
     async def roleTest(self, ctx):
         ch = await self.bot.fetch_channel(682405078451355681)
-        await ctx.reply(str(ch))
-        role = ch.guild.get_role(986797775134031872)
-        await ctx.reply(str(role))
+        await ctx.send(str(ch))
+        role = ch.guild.roles
+        print("\n".join(["{0} - {1}".format(x.name, x.id) for x in role]))
+
 
 def setup(bot):
     bot.add_cog(ServerChecker(bot))
