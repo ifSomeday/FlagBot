@@ -335,7 +335,7 @@ class GPQ_Test(commands.Cog):
     ## Discord cant embed directly from nexon API, have to save locally
     async def saveCharImg(self, charId, url):
         ## expected filepath
-        filePath = "{0}/charImgs/{1}.png".format(os.getcwd(), charId)
+        filePath = "{0}/assets/{1}.png".format(os.getcwd(), charId)
         ## check if file exists
         if os.path.exists(filePath):
             st = os.stat(filePath)
