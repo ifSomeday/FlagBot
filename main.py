@@ -1,6 +1,10 @@
+from inspect import trace
 import discord
 from discord.ext import commands
+import logging
 
+import asyncio
+import traceback
 import config
 
 if __name__ == "__main__":
@@ -8,7 +12,9 @@ if __name__ == "__main__":
     ##set up client
     intents = discord.Intents.default()
     intents.members = True
-    client = commands.Bot(command_prefix='!')
+    intents.message_content = True
+    client = commands.Bot(command_prefix='!', intents=intents)
+    #discord.utils.setup_logging(level=logging.DEBUG, root=False)
 
     @client.event
     async def on_ready():
@@ -16,21 +22,31 @@ if __name__ == "__main__":
         game = discord.Game("Korea Guild Bro")
         await client.change_presence(activity=game)
 
-    ## Points Tracker
-    #client.load_extension("points")
-    client.load_extension("serverChecker")
-    client.load_extension("db")
-    client.load_extension("flames")
-    client.load_extension("supremeLeader")
-    client.load_extension("tracker")
+        print(client.tree.get_commands())
 
-    ## GPQ Tracker
-    ##if(not config.GPQ_SHEET_ID == None):
-    ##    client.load_extension("gpq")
+        try:
+            guild = client.get_guild(1041571769586294847)
+            ret = await client.tree.sync(guild=guild)
+            print(f"sync ret {ret}")
+            print(await client.tree.fetch_commands(guild=guild))
+        except Exception as e:
+            print(f"sync error {e}")
+            print(traceback.print_exc())
 
-    ## Piggy Bank Tracker
-    ##if(not config.PB_SHEET_ID == None):
-    ##    client.load_extension("piggybank")
+
+    @client.event
+    async def setup_hook():
+        print("setup hook")
+
+    async def main():
+        async with client:
+            await client.load_extension("serverChecker")
+            #await client.load_extension("tracker")
+            await client.load_extension("gpqSync")
+            await client.load_extension("gpq")
+           
+            await client.start(config.TOKEN)
+
 
     ##run bot
-    client.run(config.TOKEN)
+    asyncio.run(main())

@@ -1,4 +1,3 @@
-import discord
 from discord.ext import commands, tasks
 from contextlib import contextmanager
 
@@ -6,14 +5,10 @@ import aioschedule as schedule
 import aiohttp
 import asyncio
 
-import requests
-import os
 import psycopg2
 from psycopg2.extras import Json
-import json
 import time
 import config
-from datetime import datetime
 
 jobIds = {
     "Warrior" : 1,
@@ -113,7 +108,6 @@ class Tracker(commands.Cog):
                 ch = self.bot.get_channel(641483284244725776)
                 await self.compareAndSend(ch, n, o)
 
-    
     async def doUpdate(self):
         print("doing update")
         new = await self.getAllRankings()
@@ -148,21 +142,21 @@ class Tracker(commands.Cog):
                 ch = self.bot.get_channel(641483284244725776)
                 await self.compareAndSend(ch, n, o)
                 
+    #@commands.hybrid_command(with_app_command=True)
     @commands.command()
     @commands.is_owner()
-    async def checkClass(self, ctx, cl):
+    async def checkclass(self, ctx: commands.Context, *, cl : str) -> None:
         if(cl in self.ids.keys()):
             new = await self.getRanking(self.ids[cl])
             old = self.getEntries(numEntries=1)[0][1][cl]
-
             await self.compareAndSend(ctx, new, old)
         else:
-            ctx.reply("Invalid class `{0}`".format(cl))
+            await ctx.reply("Invalid class `{0}`".format(cl))
 
     
     @commands.command()
     @commands.is_owner()
-    async def lastUpdate(self, ctx):
+    async def lastupdate(self, ctx):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
                 cur.execute(("SELECT timestamp FROM cheaters ORDER BY timestamp DESC"))
@@ -256,5 +250,5 @@ class Tracker(commands.Cog):
         #print([x["CharacterName"] for x in oldChars])
         return(zip(newChars, oldChars))
 
-def setup(bot):
-    bot.add_cog(Tracker(bot, 50, jobIds))
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Tracker(bot, 50, jobIds))
