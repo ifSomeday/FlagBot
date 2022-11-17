@@ -58,13 +58,12 @@ class GPQ_Test(commands.Cog):
         # Invert colors (I think tess likes black on white better?)
         thresh = cv.bitwise_not(thresh)
 
-        # Sharpen
-        # kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-        # thresh = cv.filter2D(thresh, -1, kernel)
+        # Magic
+        kernel = np.ones((5, 5), np.float32)/30
+        thresh = cv.filter2D(thresh, -1, kernel)
 
         # Iterate over contours (effectively parsing each line individually)
         res = []
-        print("=============================================")
         for c in contours:
 
             # Grab the bounding box for each contour
@@ -81,7 +80,6 @@ class GPQ_Test(commands.Cog):
             out = out.replace("Oo", " 0 0 ")
             s = [x for x in out.split(" ") if not x == ""]
 
-
             # Convert trailing entries to integers until we find one that cant be converted
             for i in range(len(s) - 1, 0, -1):
                 if(not isInt(s[i])):
@@ -92,8 +90,6 @@ class GPQ_Test(commands.Cog):
 
             # Pad list with 0s until we reach the 5 scores we want. Tesseract doesn't read trailing 0s, so this is how we account for them        
             s += [0 for j in range(4 - (len(s) - 1 - i))]
-            print(s)
-            print("=============================================")
 
             res.append(s)
         
@@ -134,7 +130,7 @@ class GPQ_Test(commands.Cog):
 
     @commands.command()
     @commands.is_owner()
-    async def test(self, ctx):
+    async def atest(self, ctx):
         if(len(ctx.message.attachments) > 0):
             attachment = await ctx.message.attachments[0].read()
             img = cv.imdecode(np.asarray(bytearray(attachment), dtype=np.uint8), cv.IMREAD_UNCHANGED)
@@ -152,8 +148,46 @@ class GPQ_Test(commands.Cog):
             await ctx.reply(response, files=[discord.File(debugBuffer, filename="debug.png")])
 
 
+    #@app_commands.guilds(discord.Object(config.GPQ_GUILD))
+    @commands.command()
+    @commands.has_guild_permissions(manage_guild=True)
+    async def addscores(self, ctx, debug: Optional[str]):
+        try:
+            gpqSync = self.bot.get_cog("GPQ_Sync")
+            if gpqSync is not None:
+                if(len(ctx.message.attachments) > 0):
+                    for attachment in ctx.message.attachments:
+                        a = await attachment.read()
+                        img = cv.imdecode(np.asarray(bytearray(a), dtype=np.uint8), cv.IMREAD_UNCHANGED)
+
+                        crop, fit = await self.matchGuildUI(img)
+                        results, debugImage = await self.readScores(crop, fit)
+                        resultsR = results[::-1]
+
+                        success, buf = cv.imencode(".png", debugImage)
+                        debugBuffer = io.BytesIO(buf)
+
+                        added, warnings, errors = await gpqSync.addOcrData(resultsR)
+                        out = f"Added {added} entries"
+                        if len(warnings) > 0:
+                            out += "\nWarnings:\n    {0}".format("\n    ".join(warnings))
+                        if len(errors) > 0:
+                            out += "\nErrors:\n    {0}".format("\n    ".join(errors))
+                        if debug:
+                            await ctx.reply(out, files=[discord.File(debugBuffer, filename="debug.png")])
+                        else:
+                            await ctx.reply(out)
+                else:
+                    await ctx.reply("Missing score screenshot")
+            else:
+                await ctx.reply("GPQ Sync not loaded, contact developer")
+        except Exception as e:
+            print(e)
+            print(traceback.print_exc())    
+
+
     @app_commands.guilds(discord.Object(config.GPQ_GUILD))
-    @app_commands.command(name="graph")
+    @app_commands.command(name="graph", description="Displays a graph with the given user's past GPQ scores.")
     async def graph(self, ctx, ign:str, ign2: Optional[str]):
         try:
             gpqSync = self.bot.get_cog("GPQ_Sync")
@@ -172,7 +206,7 @@ class GPQ_Test(commands.Cog):
 
 
     @app_commands.guilds(discord.Object(config.GPQ_GUILD))
-    @app_commands.command(name="score")
+    @app_commands.command(name="score", description="Returns the given user's scorecard, with stats about their GPQ scores.")
     async def score(self, ctx, ign:str):
         try:
             gpqSync = self.bot.get_cog("GPQ_Sync")
@@ -192,7 +226,7 @@ class GPQ_Test(commands.Cog):
 
 
     @app_commands.guilds(discord.Object(config.GPQ_GUILD))
-    @app_commands.command(name="weektop")
+    @app_commands.command(name="weektop", description="Returns the top 10 GPQ scores of the current week.")
     async def weektop(self, ctx):
         try:
             gpqSync = self.bot.get_cog("GPQ_Sync")
@@ -211,7 +245,7 @@ class GPQ_Test(commands.Cog):
 
     
     @app_commands.guilds(discord.Object(config.GPQ_GUILD))
-    @app_commands.command(name="top")
+    @app_commands.command(name="top", description="Returns the top 10 GPQ scores of all-time. Only includes each user's highest score.")
     async def top(self, ctx):
         try:
             gpqSync = self.bot.get_cog("GPQ_Sync")

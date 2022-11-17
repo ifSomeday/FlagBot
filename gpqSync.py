@@ -84,6 +84,7 @@ class GPQ_Sync(commands.Cog):
             print(e)
             print(traceback.print_exc())
 
+
     def loadSheets(self):
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         credFile = os.path.join(os.getcwd(), config.CRED_FILE)
@@ -91,6 +92,41 @@ class GPQ_Sync(commands.Cog):
         service = discovery.build("sheets", "v4", credentials=creds)
         sheet = service.spreadsheets()
         return(sheet)
+
+
+    async def addOcrData(self, data):
+        warnings = []
+        errors = []
+        added = 0
+        with self.dbConnect(auto=False) as conn:
+            with conn.cursor() as cur:
+                currentWeek = self.getCurrentWeek()
+                print(f"Current Week: {currentWeek}")
+                for d in data:
+                    try:
+                        print("=====================================")
+                        ign = d[0]
+                        score = d[-3]
+                        cur.execute("SELECT similarity(%s, ign) as sim, id, ign FROM characters ORDER BY sim DESC", (ign, ))
+                        sim, charId, ign2 = cur.fetchone()
+                        print(sim, charId, ign2)
+                        if ign2.lower() != ign.lower():
+                            print(d)
+                            if sim < 0.1:
+                                error = f"Couldn't find `{ign}` in database. Are they on the sheet?"
+                                errors.append(error)
+                                print(error)
+                            else:
+                                warn = f"Using closest match `{ign2}` for `{ign}` ({round(sim, 2)})"
+                                warnings.append(warn)
+                                print(warn)
+                        cur.execute("INSERT INTO scores (charid, week, score) VALUES (%s, %s, %s) ON CONFLICT (charid, week) DO UPDATE SET score = %s", (charId, currentWeek, score, score))
+                        added += 1
+                    except Exception as e:
+                        print(f"Exception adding data: {e}")
+                        print(traceback.print_exc())
+                conn.commit()
+        return(added, warnings, errors)
 
 
     async def getNexonRanking(self, ign):
@@ -156,8 +192,6 @@ class GPQ_Sync(commands.Cog):
     async def getTopScores(self):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
-                #cur.execute("SELECT * FROM SCORES ORDER BY score DESC LIMIT 20")
-                #cur.execute("SELECT DISTINCT ON (charid) * FROM scores ORDER BY charid, score DESC LIMIT 20")
                 cur.execute("SELECT * FROM (SELECT DISTINCT ON (charid) * FROM scores ORDER BY charid, score DESC) t ORDER BY score DESC LIMIT 20")
                 scores = cur.fetchall()
                 return(scores)
@@ -215,6 +249,7 @@ class GPQ_Sync(commands.Cog):
                             cur.execute("INSERT INTO scores (charid, week, score) VALUES (%s, %s, %s) ON CONFLICT (charid, week) DO UPDATE SET score = %s", (charId, date, scoreNum, scoreNum))
                     conn.commit()
 
+
     def updateSheetFromTable(self, data):
         values = data["values"]
         dates = values[0]
@@ -239,28 +274,23 @@ class GPQ_Sync(commands.Cog):
                         continue
 
                     ## Get the users first and last week of running
-                    firstWeek = scoresRes[0][2]
-                    lastWeek = scoresRes[-1][2]
                     row = self.getUserRow(values, ign)
                     if(row == None):
                         ##TODO: add user to table? 
                         print(f"User {ign} is not in table")
                         continue
 
-                    ## Grab arrays of scores for sheet and DB
-                    sheetScores = self.sheetScoresToInt(values[row][7:])
-                    dbScores = [s[3] for s in scoresRes]
-
-                    ## Strip out leading 0s. This is safe because sheet -> db handles non runs already
-                    dbScores = self.removeLeadingElements(dbScores, e=0)
-                    sheetScores = self.removeLeadingElements(sheetScores, e=0)
+                    needUpdate, merged = self.mergeScores(scoresRes, values[row][7:], dates[7:])
 
                     # This means we have new info in the DB, likely from OCR
-                    if(sheetScores != dbScores):
+                    if(needUpdate):
+                        mergedTupleList = [(k, v) for k, v in merged.items()]
+                        sortedMergedTupleList = sorted(mergedTupleList, key=lambda x : datetime.datetime.strptime(x[0], "%d/%m/%y"))
+                        valList = [x[1] for x in sortedMergedTupleList]
                         insertData.append(
                             {
-                                "range" : f"Culvert!{self.getColFromDate(dates, firstWeek)}{row + 1}:{self.getColFromDate(dates, lastWeek)}{row + 1}",
-                                "values" : [[s if s != 0 else '' for s in dbScores]]
+                                "range" : f"Culvert!{self.getColFromDate(dates, sortedMergedTupleList[0][0])}{row + 1}:{self.getColFromDate(dates, sortedMergedTupleList[-1][0])}{row + 1}",
+                                "values" : [valList]
                             }
                         )
                 
@@ -275,19 +305,21 @@ class GPQ_Sync(commands.Cog):
                     print(f"Update sheet result: {result}")
 
 
-    def sheetScoresToInt(self, scores):
-        out = []
-        for score in scores:
-            try:
-                out.append(0 if score.strip() == '' else int(score.strip().replace(",", "")))
-            except:
-                out.append(0)
-        return(out)
-    
+    def mergeScores(self, dbScores, sheetScores, dates):
+        f = "#" if os.name == "nt" else "-"
+        dbScoresDict = {s[2].strftime(f"%{f}d/%{f}m/%y") : s[3] for s in dbScores}
+        sheetScoresDict = {k : v for k, v in zip(dates, sheetScores)}
+        merged = sheetScoresDict.copy()
+        for k, v in dbScoresDict.items():
+            merged[k] = v
+        if(len(sheetScoresDict) != len(merged)):
+            for date in dates:
+                merged.setdefault(date, '')
+        return(len(sheetScoresDict) != len(merged), merged)
+
 
     def getColFromDate(self, dates, week):
-        s = "#" if os.name == "nt" else "-"
-        dateStr = week.strftime(f"%{s}d/%{s}m/%y")
+        dateStr = week
         idx = dates.index(dateStr)
         col = self.cs(idx)
         return(col)
@@ -311,8 +343,15 @@ class GPQ_Sync(commands.Cog):
         return(out)
 
 
+    def getCurrentWeek(self):
+        today = datetime.date.today()
+        weekday = today.weekday()
+        monday = today - datetime.timedelta(days=weekday)
+        return(monday)
+
+
     ## converts a number to the column string
-    def cs(n):
+    def cs(self, n):
         n += 1
         s = ""
         while n > 0:
@@ -336,17 +375,17 @@ class GPQ_Sync(commands.Cog):
     ## This way, we can update the sheet to correct OCR errors the bot might encounter
     async def syncData(self):
         async with self.syncLock:
-            #print("Getting users")
-            #users = self.getAllUsers2()
-            #print("Updating characters")
-            #self.updateCharacterTable2(users)
+            print("Getting users")
+            users = self.getAllUsers2()
+            print("Updating characters")
+            self.updateCharacterTable2(users)
             
-            #print("Getting data")
-            #data = self.__getWholeSheet()
-            #print("Updating Table from Sheet")
-            #self.updateTableFromSheet(data)
-            #print("Updating Sheet from Table")
-            #self.updateSheetFromTable(data)
+            print("Getting data")
+            data = self.__getWholeSheet()
+            print("Updating Table from Sheet")
+            self.updateTableFromSheet(data)
+            print("Updating Sheet from Table")
+            self.updateSheetFromTable(data)
 
             print("Updating IGN list")
             out = await self.getAllUsersGlobal()

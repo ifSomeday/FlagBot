@@ -25,7 +25,7 @@ if __name__ == "__main__":
         print(client.tree.get_commands())
 
         try:
-            guild = client.get_guild(1041571769586294847)
+            guild = client.get_guild(config.GPQ_GUILD)
             ret = await client.tree.sync(guild=guild)
             print(f"sync ret {ret}")
             print(await client.tree.fetch_commands(guild=guild))
