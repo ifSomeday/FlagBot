@@ -29,7 +29,8 @@ class GPQ_Sync(commands.Cog):
         self.reboot = 1 ##1 for reboot, 0 for reg
 
         self.syncLoop.start()
-        #self.rankingLoop.start()
+        self.firstLoop = True
+        self.rankingLoop.start()
 
 
     @contextmanager
@@ -55,6 +56,9 @@ class GPQ_Sync(commands.Cog):
 
     @tasks.loop(hours=24)
     async def rankingLoop(self):
+        if(self.firstLoop):
+            self.firstLoop = False
+            return
         try:
             users = await self.getAllUsersGlobal()
             with self.dbConnect() as conn:

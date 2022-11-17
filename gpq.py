@@ -190,6 +190,8 @@ class GPQ_Test(commands.Cog):
     @app_commands.command(name="graph", description="Displays a graph with the given user's past GPQ scores.")
     async def graph(self, ctx, ign:str, ign2: Optional[str]):
         try:
+            if not await self.isInGpqChannel(ctx):
+                return
             gpqSync = self.bot.get_cog("GPQ_Sync")
             if gpqSync is not None:
                 scores = await gpqSync.getUserScores(ign)
@@ -209,6 +211,8 @@ class GPQ_Test(commands.Cog):
     @app_commands.command(name="score", description="Returns the given user's scorecard, with stats about their GPQ scores.")
     async def score(self, ctx, ign:str):
         try:
+            if not await self.isInGpqChannel(ctx):
+                return
             gpqSync = self.bot.get_cog("GPQ_Sync")
             if gpqSync is not None:
                 scores = await gpqSync.getUserScores(ign)
@@ -229,6 +233,8 @@ class GPQ_Test(commands.Cog):
     @app_commands.command(name="weektop", description="Returns the top 10 GPQ scores of the current week.")
     async def weektop(self, ctx):
         try:
+            if not await self.isInGpqChannel(ctx):
+                return
             gpqSync = self.bot.get_cog("GPQ_Sync")
             if gpqSync is not None:
                 scores = await gpqSync.getWeekTopScores()
@@ -248,6 +254,8 @@ class GPQ_Test(commands.Cog):
     @app_commands.command(name="top", description="Returns the top 10 GPQ scores of all-time. Only includes each user's highest score.")
     async def top(self, ctx):
         try:
+            if not await self.isInGpqChannel(ctx):
+                return
             gpqSync = self.bot.get_cog("GPQ_Sync")
             if gpqSync is not None:
                 scores = await gpqSync.getTopScores()
@@ -261,7 +269,14 @@ class GPQ_Test(commands.Cog):
         except Exception as e:
             print(e)
             print(traceback.print_exc())
-    
+
+
+    async def isInGpqChannel(self, interaction):
+        if(interaction.channel.id != config.GPQ_CHANNEL):
+            await interaction.response.send_message("Command must be used in GPQ channel", ephemeral=True)
+            return(False)
+        return(True)
+
 
     async def buildScoreEmbed(self, ign, scores, ranking):
         emb = discord.Embed(title=ign, description="Bounce GPQ stats", color=discord.Colour.green())
@@ -312,10 +327,10 @@ class GPQ_Test(commands.Cog):
                 file = discord.File(filePath, filename="{0}.png".format(topScorer[10]))
                 emb.set_thumbnail(url= "attachment://{0}.png".format(topScorer[10]))
         
-        emb.add_field(name="1. {0}".format(scorers[0][1]), value=f"{scores[0][3]:,}" + (" ({0})".format(scores[0][2]) if week else ""), inline=False)
+        emb.add_field(name="1. {0}".format(scorers[0][1]), value=f"{scores[0][3]:,}" + (" ({0})".format(scores[0][2]) if not week else ""), inline=False)
 
         for i, (scorer, score) in enumerate(zip(scorers[1:], scores[1:])):
-            emb.add_field(name="{0}. {1}".format(i+2, scorer[1]), value=f"{score[3]:,}" + (" ({0})".format(score[2]) if week else ""))
+            emb.add_field(name="{0}. {1}".format(i+2, scorer[1]), value=f"{score[3]:,}" + (" ({0})".format(score[2]) if not week else ""))
 
         return(emb, file)
 
