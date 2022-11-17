@@ -186,7 +186,7 @@ class GPQ_Test(commands.Cog):
             print(traceback.print_exc())    
 
 
-    @app_commands.guilds(discord.Object(config.GPQ_GUILD))
+    @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
     @app_commands.command(name="graph", description="Displays a graph with the given user's past GPQ scores.")
     async def graph(self, ctx, ign:str, ign2: Optional[str]):
         try:
@@ -207,7 +207,7 @@ class GPQ_Test(commands.Cog):
             print(traceback.print_exc())
 
 
-    @app_commands.guilds(discord.Object(config.GPQ_GUILD))
+    @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
     @app_commands.command(name="score", description="Returns the given user's scorecard, with stats about their GPQ scores.")
     async def score(self, ctx, ign:str):
         try:
@@ -229,7 +229,7 @@ class GPQ_Test(commands.Cog):
             print(traceback.print_exc())
 
 
-    @app_commands.guilds(discord.Object(config.GPQ_GUILD))
+    @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
     @app_commands.command(name="weektop", description="Returns the top 10 GPQ scores of the current week.")
     async def weektop(self, ctx):
         try:
@@ -250,7 +250,7 @@ class GPQ_Test(commands.Cog):
             print(traceback.print_exc())
 
     
-    @app_commands.guilds(discord.Object(config.GPQ_GUILD))
+    @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
     @app_commands.command(name="top", description="Returns the top 10 GPQ scores of all-time. Only includes each user's highest score.")
     async def top(self, ctx):
         try:
@@ -272,7 +272,7 @@ class GPQ_Test(commands.Cog):
 
 
     async def isInGpqChannel(self, interaction):
-        if(interaction.channel.id != config.GPQ_CHANNEL):
+        if(not interaction.channel.id in config.GPQ_CHANNELS):
             await interaction.response.send_message("Command must be used in GPQ channel", ephemeral=True)
             return(False)
         return(True)
