@@ -20,6 +20,13 @@ from discord import app_commands
 
 import config
 
+
+def isRightGuild():
+    def predicate(ctx):
+        return ctx.guild.id in [config.GPQ_GUILD, config.DEV_GUILD]
+    return commands.check(predicate)
+
+
 class GPQ_Test(commands.Cog):
     
     def __init__(self, bot):
@@ -81,6 +88,7 @@ class GPQ_Test(commands.Cog):
             s = [x for x in out.split(" ") if not x == ""]
 
             # Convert trailing entries to integers until we find one that cant be converted
+            i = 0
             for i in range(len(s) - 1, 0, -1):
                 if(not isInt(s[i])):
                     break
@@ -150,7 +158,7 @@ class GPQ_Test(commands.Cog):
 
     #@app_commands.guilds(discord.Object(config.GPQ_GUILD))
     @commands.command()
-    @commands.has_guild_permissions(manage_guild=True)
+    @commands.check_any(commands.has_guild_permissions(manage_guild=True), isRightGuild())
     async def addscores(self, ctx, debug: Optional[str]):
         try:
             gpqSync = self.bot.get_cog("GPQ_Sync")

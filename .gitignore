@@ -128,3 +128,5 @@ config.py
 *.pickle
 db.py
 flameTest.py
+assets/[0-9]*
+

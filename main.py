@@ -22,13 +22,14 @@ if __name__ == "__main__":
         game = discord.Game("Korea Guild Bro")
         await client.change_presence(activity=game)
 
-        print(client.tree.get_commands())
+        print("Current tree: " + str(client.tree.get_commands()))
 
         try:
-            guild = client.get_guild(config.GPQ_GUILD)
-            ret = await client.tree.sync(guild=guild)
-            print(f"sync ret {ret}")
-            print(await client.tree.fetch_commands(guild=guild))
+            for gId in [config.GPQ_GUILD, config.DEV_GUILD]:
+                guild = client.get_guild(gId)
+                ret = await client.tree.sync(guild=guild)
+                print(f"sync ret {ret}")
+                print(await client.tree.fetch_commands(guild=guild))
         except Exception as e:
             print(f"sync error {e}")
             print(traceback.print_exc())

@@ -156,5 +156,5 @@ class ServerChecker(commands.Cog):
         print("\n".join(["{0} - {1}".format(x.name, x.id) for x in role]))
 
 
-def setup(bot):
-    bot.add_cog(ServerChecker(bot))
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(ServerChecker(bot))
