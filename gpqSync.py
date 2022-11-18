@@ -209,6 +209,13 @@ class GPQ_Sync(commands.Cog):
                 return(character)
 
 
+    async def getTopTotalScores(self):
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT charid, sum(score) FROM scores GROUP BY charid ORDER BY sum(score) DESC")
+                scores = cur.fetchall()
+                return(scores)
+
     ## Needs optimization so it isn't inserting every score every single sync
     def updateTableFromSheet(self, data):
         values = data["values"]

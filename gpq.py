@@ -208,8 +208,8 @@ class GPQ_Test(commands.Cog):
 
 
     @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
-    @app_commands.command(name="score", description="Returns the given user's scorecard, with stats about their GPQ scores.")
-    async def score(self, ctx, ign:str):
+    @app_commands.command(name="gpq", description="Returns the given user's scorecard, with stats about their GPQ scores.")
+    async def gpq(self, ctx, ign:str):
         try:
             if not await self.isInGpqChannel(ctx):
                 return
@@ -230,15 +230,15 @@ class GPQ_Test(commands.Cog):
 
 
     @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
-    @app_commands.command(name="weektop", description="Returns the top 10 GPQ scores of the current week.")
-    async def weektop(self, ctx):
+    @app_commands.command(name="topweek", description="Returns the top GPQ scores of the current week (default 10 scores).")
+    async def topweek(self, ctx, n : Optional[int] = 10):
         try:
             if not await self.isInGpqChannel(ctx):
                 return
             gpqSync = self.bot.get_cog("GPQ_Sync")
             if gpqSync is not None:
-                scores = await gpqSync.getWeekTopScores()
-                emb, file = await self.buildTopEmbed(scores, gpqSync, week=True)
+                scores = await gpqSync.gettopweekScores()
+                emb, file = await self.buildTopEmbed(scores, gpqSync, week=True, title=f"Top {n} GPQ Scores ({scores[0][2]})", numScores=n)
                 if file == None:
                     await ctx.response.send_message(embed=emb)
                 else:
@@ -251,15 +251,38 @@ class GPQ_Test(commands.Cog):
 
     
     @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
-    @app_commands.command(name="top", description="Returns the top 10 GPQ scores of all-time. Only includes each user's highest score.")
-    async def top(self, ctx):
+    @app_commands.command(name="top", description="Returns the top GPQ scores of all-time (default 10 scores). Only includes each user's highest score.")
+    async def top(self, ctx, n : Optional[int] = 10):
         try:
             if not await self.isInGpqChannel(ctx):
                 return
             gpqSync = self.bot.get_cog("GPQ_Sync")
             if gpqSync is not None:
                 scores = await gpqSync.getTopScores()
-                emb, file = await self.buildTopEmbed(scores, gpqSync)
+                emb, file = await self.buildTopEmbed(scores, gpqSync, numScores=n, title=f"Top {n} GPQ Scores (All-Time)")
+                if file == None:
+                    await ctx.response.send_message(embed=emb)
+                else:
+                    await ctx.response.send_message(file=file, embed=emb)
+            else:
+                await ctx.response.send_message("GPQ Sync not loaded, contact developer")
+        except Exception as e:
+            print(e)
+            print(traceback.print_exc())
+
+
+    @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
+    @app_commands.command(name="toptotal", description="Returns the top total GPQ scores of all-time (default 10 scores).")
+    async def toptotal(self, ctx, n : Optional[int] = 10):
+        try:
+            if not await self.isInGpqChannel(ctx):
+                return
+            gpqSync = self.bot.get_cog("GPQ_Sync")
+            if gpqSync is not None:
+                scores = await gpqSync.getTopTotalScores()
+                ##needs to be in the format [x, charid, x, score]
+                scores = [(None, x[0], None, x[1]) for x in scores]
+                emb, file = await self.buildTopEmbed(scores, gpqSync, title=f"Top {n} Dubsly Dollar Earners (All-Time)", numScores=n, week=True)
                 if file == None:
                     await ctx.response.send_message(embed=emb)
                 else:
@@ -305,7 +328,7 @@ class GPQ_Test(commands.Cog):
 
         emb.add_field(name="Average Score", value=f"{averageScore:,} points")
         emb.add_field(name="Best Score", value=f"{bestScore:,} points")
-        emb.add_field(name="Total Score", value=f"{totalScore:,} points")
+        emb.add_field(name="Total Dubsly Dollars", value=f"{totalScore:,} points")
 
         ## Recents
         recentScores = list(reversed(scores))[:5]
@@ -314,11 +337,11 @@ class GPQ_Test(commands.Cog):
         return(emb, file)
 
 
-    async def buildTopEmbed(self, scores, gpqSync, week=False):
-        emb = discord.Embed(title="Top 10 GPQ Scores ({0})".format("All-Time" if not week else scores[0][2]), color=discord.Colour.green())
+    async def buildTopEmbed(self, scores, gpqSync, title="Top 10 GPQ Scores (All-Time)", week=False, numScores = 10):
+        emb = discord.Embed(title=title, color=discord.Colour.green())
         file = None
 
-        scorers = [await gpqSync.getCharacterByCharId(s[1]) for s in scores[:10]]
+        scorers = [await gpqSync.getCharacterByCharId(s[1]) for s in scores[:min(numScores, 25)]]
         topScorer = await gpqSync.getRankingInfo(scorers[0][1])
 
         if topScorer != None:
@@ -327,10 +350,8 @@ class GPQ_Test(commands.Cog):
                 file = discord.File(filePath, filename="{0}.png".format(topScorer[10]))
                 emb.set_thumbnail(url= "attachment://{0}.png".format(topScorer[10]))
         
-        emb.add_field(name="1. {0}".format(scorers[0][1]), value=f"{scores[0][3]:,}" + (" ({0})".format(scores[0][2]) if not week else ""), inline=False)
-
-        for i, (scorer, score) in enumerate(zip(scorers[1:], scores[1:])):
-            emb.add_field(name="{0}. {1}".format(i+2, scorer[1]), value=f"{score[3]:,}" + (" ({0})".format(score[2]) if not week else ""))
+        for i, (scorer, score) in enumerate(zip(scorers, scores)):
+            emb.add_field(name="{0}. {1}".format(i+1, scorer[1]), value=f"{score[3]:,}" + (" ({0})".format(score[2]) if not week else ""), inline = False if i == 0 else True)
 
         return(emb, file)
 
@@ -401,7 +422,7 @@ class GPQ_Test(commands.Cog):
                     return(filePath)
 
 
-    @score.autocomplete('ign')
+    @gpq.autocomplete('ign')
     @graph.autocomplete('ign')
     @graph.autocomplete('ign2')
     async def scoreAutocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
