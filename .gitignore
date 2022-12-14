@@ -130,3 +130,5 @@ db.py
 flameTest.py
 templates/*
 charImgs/*
+assets/[0-9]*
+
