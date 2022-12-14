@@ -10,8 +10,10 @@ import difflib
 import re
 import typing
 import time
+import math
 import io
 import traceback
+import config
 
 """
 This is a super rudimentary flame bot
@@ -88,31 +90,34 @@ class Flames(commands.Cog):
     
 
     @commands.command()
-    @commands.is_owner()
-    async def flame2(self, ctx, level : int = -1):
+    async def flame(self, ctx, level : int = -1):
+        if(ctx.channel.id != config.BOT_COMMANDS or ctx.guild.id != config.DEV_GUILD):
+            return
         if(len(ctx.message.attachments) == 0):
             await ctx.reply("Please attach an image of an item.")
             return
-
         async with ctx.channel.typing():
             try:
                 attach = await ctx.message.attachments[0].read()
                 img = cv.imdecode(np.asarray(bytearray(attach), dtype=np.uint8), 1)
 
-                lines, imgs = await self.parseImage2(img, level=level)
+                lines, inc, flameScores, imgs = await self.parseImage2(img, level=level)
 
+                if(lines == {}):
+                    await ctx.reply("No flames found, try a different image.")
 
                 files = []
                 for i, img in enumerate(imgs):
                     success, buf = cv.imencode(".png", img)
                     debugBuffer = io.BytesIO(buf)
                     # files.append(discord.File(debugBuffer, filename=f"debug{i}.png"))
-
-                await ctx.reply(str(lines), files=files)
+                emb = self.buildFlameEmbed2(lines, flameScores, inc)
+                await ctx.reply("", embed=emb, files=files)
                 #await ctx.reply("", embed=parsed)
             except Exception as e:
                 print(e)
                 print(traceback.print_exc())
+                await ctx.reply("Unknown error occoured, try a different image")
 
 
     async def matchImageScale(self, img, templatePath, label="", canny=True):
@@ -120,7 +125,7 @@ class Flames(commands.Cog):
         baseH, baseW = template.shape[:2]
 
         edges = cv.Canny(img.copy(), 150, 200)
-        cv.imwrite(f"templates/edges_{label}.png", edges)
+        #cv.imwrite(f"templates/edges_{label}.png", edges)
 
         bestFit = None
         bestCrop = None
@@ -131,7 +136,7 @@ class Flames(commands.Cog):
         for scale in np.linspace(0.5, 2.0, 7):
             # resize template to a scale
             templateR = cv.resize(template.copy(), (int(baseW * scale), int(baseH * scale)), cv.INTER_CUBIC)
-            #ret, templateR = cv.threshold(templateR, 75, 255, cv.THRESH_BINARY)
+            ret, templateR = cv.threshold(templateR, 75, 255, cv.THRESH_BINARY)
             templateR = cv.Canny(templateR.copy(), 150, 200)
             #cv.imwrite(f"templates/template_{label}_{scale}.png", templateR)
             tH, tW = templateR.shape[:2]
@@ -152,10 +157,10 @@ class Flames(commands.Cog):
                 bounds = (maxLoc[1], maxLoc[1]+tH, maxLoc[0], maxLoc[0]+tW)
                 bestScale = scale
 
-        print(f"Matched {templatePath} at scale {bestScale} with certainty {bestFit[0]}")
-        print(f"Matched bounds {tH}, {tW}")
-        cv.imwrite(f"templates/crop_{label}.png", bestCrop)
-        cv.imwrite(f"templates/canny_{label}.png", bestCanny)
+        #print(f"Matched {templatePath} at scale {bestScale} with certainty {bestFit[0]}")
+        #print(f"Matched bounds {tH}, {tW}")
+        #cv.imwrite(f"templates/crop_{label}.png", bestCrop)
+        #cv.imwrite(f"templates/canny_{label}.png", bestCanny)
         return(bestCrop, bestFit, bestScale, bounds)
 
 
@@ -171,6 +176,54 @@ class Flames(commands.Cog):
             flamesText = ["• " + ", ".join("T{0} {1}".format(flame.tier, " + ".join(flame.stats)) for flame in x) for x in flames]
             emb.add_field(name="Possible Flames", value="\n".join(flamesText))
         return(emb)
+
+    def buildFlameEmbed2(self, flameDict, flameScores, inc):
+        emb = discord.Embed()
+        emb.title = "Flame Stats"
+        emb.set_footer(text="by lostara", icon_url="https://cdn.discordapp.com/emojis/947022653082988544.png")
+        emb.color = discord.Color.purple()
+        emb.set_thumbnail(url="https://cdn.discordapp.com/emojis/743215456839532604.png")
+        for level, flames in flameDict.items():
+            titleText = "Level {0}".format(level)
+            if inc != -1:
+                titleText = "Levels {0}-{1}".format(level, level+inc-1)
+            if(len(flames) == 1):
+                flamesText = ", ".join("T{0} {1}".format(flame.tier, " + ".join(flame.stats)) for flame in flames[0])
+                emb.add_field(name=titleText, value=flamesText, inline=False)
+            else:
+                flamesText = ["• " + ", ".join("T{0} {1}".format(flame.tier, " + ".join(flame.stats)) for flame in x) for x in flames]
+                emb.add_field(name=titleText, value="\n".join(flamesText), inline=False)
+
+        emb.add_field(name="Flame Scores", value="\n".join("• {0}: {1}".format(k, v) for k, v in flameScores.items() if v != 0))
+        return(emb)
+
+
+    def calculateFlameScore(self, flameDict):
+        ## https://drive.google.com/file/d/1NK4ny-zF2mu8DzfK1QuyFlVmB961JXJm/view
+        attackRatio = 2.5
+        secondaryRatio = 1/15
+        allStatRatio = 9
+
+        ##Indicates we have a weapon, so dont calculate flame atk in flame score
+        if(flameDict.get(FlameCalc.Stats.ATTACK, 0) > 7 or flameDict.get(FlameCalc.Stats.MAGIC_ATTACK, 0) > 7 or flameDict.get(FlameCalc.Stats.BOSS, 0) != 0 or flameDict.get(FlameCalc.Stats.DMG, 0) != 0):
+            attackRatio = 0
+
+        flames = { "STR" : 0,
+                "DEX" : 0,
+                "INT" : 0,
+                "LUK" : 0 }
+        if(FlameCalc.Stats.STR in flameDict):
+            flames["STR"] = math.floor(flameDict.get(FlameCalc.Stats.STR, 0) + (flameDict.get(FlameCalc.Stats.DEX, 0) * secondaryRatio) + (flameDict.get(FlameCalc.Stats.ATTACK, 0) * attackRatio) + (flameDict.get(FlameCalc.Stats.ALL_STAT, 0) * allStatRatio))
+        if(FlameCalc.Stats.DEX in flameDict):
+            flames["DEX"] = math.floor(flameDict.get(FlameCalc.Stats.DEX, 0) + (flameDict.get(FlameCalc.Stats.STR, 0) * secondaryRatio) + (flameDict.get(FlameCalc.Stats.ATTACK, 0) * attackRatio) + (flameDict.get(FlameCalc.Stats.ALL_STAT, 0) * allStatRatio))
+        if(FlameCalc.Stats.INT in flameDict):
+            flames["INT"] = math.floor(flameDict.get(FlameCalc.Stats.INT, 0) + (flameDict.get(FlameCalc.Stats.LUK, 0) * secondaryRatio) + (flameDict.get(FlameCalc.Stats.MAGIC_ATTACK, 0) * attackRatio) + (flameDict.get(FlameCalc.Stats.ALL_STAT, 0) * allStatRatio))
+        if(FlameCalc.Stats.LUK in flameDict):
+            flames["LUK"] = math.floor(flameDict.get(FlameCalc.Stats.LUK, 0) + (flameDict.get(FlameCalc.Stats.DEX, 0) * secondaryRatio) + (flameDict.get(FlameCalc.Stats.ATTACK, 0) * attackRatio) + (flameDict.get(FlameCalc.Stats.ALL_STAT, 0) * allStatRatio))
+
+        print(flames)
+
+        return(flames)
 
 
     async def parseImage2(self, img, level = -1):
@@ -207,10 +260,9 @@ class Flames(commands.Cog):
         cleanedFlame = self.cleanFlame(img)
         cleanedLevel = self.cleanLevel2(levelCrop)  
 
-        cv.imwrite("templates/cleanedGrey.png", cleanedGrey)
-        cv.imwrite("templates/cleanedFlame.png", cleanedFlame)
-        cv.imwrite("templates/cleanedLevel.png", cleanedLevel)
-
+        #cv.imwrite("templates/cleanedGrey.png", cleanedGrey)
+        #cv.imwrite("templates/cleanedFlame.png", cleanedFlame)
+        #cv.imwrite("templates/cleanedLevel.png", cleanedLevel)
 
         ## Create cropped copy of debug image for output
         img3 = img.copy() #[flameBounds[0]:flameBounds[1], flameBounds[2]:flameBounds[3]]
@@ -296,14 +348,16 @@ class Flames(commands.Cog):
         print(flameDict)
         print(baseDict)
 
+        flameScores = self.calculateFlameScore(flameDict)
+
         calc = FlameCalc.FlameCalc()
         validFlames = {}
+        inc = -1
         if level == -1:
-            cv.imwrite("levelcrop.png", cleanedLevel)
+            #cv.imwrite("levelcrop.png", cleanedLevel)
             levelOcr = tess.image_to_string(cleanedLevel)
             print(f"levelOcr {levelOcr}")
             levels = re.findall(r"([\d]+)", levelOcr)
-            print(f"levels {levels}")
 
             for level in levels:
                 res = calc.calcFlame(flameDict, baseDict, int(level))
@@ -311,7 +365,10 @@ class Flames(commands.Cog):
                     validFlames[level] = res
 
             if validFlames == {}:
-                for level in range(0, 205, 5):
+                inc = 20
+                if any(x in list(flameDict.keys()) for x in [FlameCalc.Stats.MP, FlameCalc.Stats.HP]):
+                    inc = 10
+                for level in range(0, 250, inc):
                     res = calc.calcFlame(flameDict, baseDict, level)
                     if len(res) > 0:
                         validFlames[level] = res
@@ -323,7 +380,7 @@ class Flames(commands.Cog):
                 validFlames[level] = res
 
 
-        return(validFlames, (img3, morph, contourImg, cleanedGrey, cleanedFlame))
+        return(validFlames, inc, flameScores, (img3, morph, contourImg, cleanedGrey, cleanedFlame))
 
 
     def cropContour(self, x, y, w, h, img):
@@ -338,129 +395,12 @@ class Flames(commands.Cog):
         #print(f"Shape: {imgH}, {imgW}\nCrop: {y1}, {y2}, {x}, {x+w}")
         return(img[y1:y2, x:x+w])
 
-
-
-    def parseImage(self, img, level = -1):
-
-        #print(img.shape)
-        imgGrey = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-
-        start = time.time()
-
-        cleaned = self.cleanImage(img)
-        cleanedGrey = self.cleanImage(imgGrey, thresh=75)
-        cleanedFlame = self.cleanFlame(img)
-        cleanedLevel = self.cleanLevel(img)
-
-        levelFrame = tess.image_to_data(cleanedLevel, output_type=tess.Output.DATAFRAME)
-
-        croppedLevel = self.cropLevel(cleanedLevel, levelFrame)
-
-        data = tess.image_to_data(cleanedGrey, output_type=tess.Output.DICT)
-
-        end = time.time()
-        print("initial processing took {0}s".format(end - start))
-
-
-        statsTopLeft = (0, 0)
-        dataText = data["text"]
-        m = difflib.get_close_matches("Type", dataText, cutoff=0.5)
-        #print(dataText)
-        if(m):
-            idx = dataText.index(m[0])
-            statsTopLeft = (data["top"][idx], data["left"][idx])
-        else:
-            print("Unable to find stats")
-            return(False, "Unable to locate stats")
-
-        start2 = time.time()
-
-        croppedStats = cleaned.copy()[statsTopLeft[0]:,:]
-        croppedFlameStats = cleanedFlame.copy()[statsTopLeft[0]:,:]
-
-        ##Crop stats
-        statFrame = tess.image_to_data(croppedStats, output_type=tess.Output.DATAFRAME)
-        statFrame = statFrame.copy()[~statFrame.text.isnull()]
-        
-        ##Crop flames
-        flameFrame = tess.image_to_data(croppedFlameStats, output_type=tess.Output.DATAFRAME)
-        flameFrame = flameFrame.copy()[~flameFrame.text.isnull()]
-
-        ##Level Frame
-        levelData = tess.image_to_data(croppedLevel, output_type=tess.Output.DICT)
-
-        end2 = time.time()
-
-        print("Seconary Processing Took {0}s".format(end2 - start2))
-
-        flames = []
-        base = []
-        flameFrame["text"] = flameFrame["text"].astype(str)
-        
-        for i, row in flameFrame.iterrows():
-            if(re.search(r"\+(\d+)%?", row["text"])):
-                top = statFrame.loc[statFrame['top'].sub(row["top"]).abs().idxmin()]["top"]
-                statRow = statFrame.loc[(abs(statFrame["top"] - top) < 5) & (statFrame["left"] < row["left"] - 1)]
-                
-                statText = re.findall(r"([\w ]+)", " ".join(statRow["text"]))[0]
-                statValue = int(re.findall(r"(\d+)", row["text"])[-1])
-                
-                m = re.search(r"(\d+)", statRow.iloc[-1]["text"])
-                
-                baseValue = 0
-                if(m):
-                    baseValue = int(m.group(1))
-                flames.append([statText, statValue, baseValue])
-        
-
-        flameDict = {}
-        baseDict = {}
-
-        for flame in flames:
-            stat = difflib.get_close_matches(flame[0].lower(), self.statMap.keys(), cutoff=0)
-            if(len(stat) > 0):
-                flameDict[self.statMap[stat[0]]] = flame[1]
-                baseDict[self.statMap[stat[0]]] = flame[2]
-            else:
-                print("Invalid Stats {0}".format(flame))
-                return(False, "Invalid stat {0}".format(flame[0]))
-        
-
-        levelText = [x for x in levelData["text"] if not x == ""]
-        if(level == -1):
-            level = 0
-            m = difflib.get_close_matches("LEV:", levelText)
-            if(len(m) == 0):
-                print("No LEV matches")
-                return(False, "Unable to automatically determine level.\nFlame bot struggles with this, and you can manually specify the level with `!flame <level>`")
-            idx = levelText.index(m[0])
-            if(idx == len(levelText) - 1):
-                print("No numbers")
-                return(False, "Unable to automatically determine level.\nFlame bot struggles with this, and you can manually specify the level with `!flame <level>`")
-            m = re.findall(r"(\d+)", " ".join(levelText[idx:]))
-            print(" ".join(levelText[idx:]))
-            if(m):
-                level = int(m[0])
-                print("Level: {0}".format(m[0]))
-            else:
-                print("re match failed")
-                return(False, "Unable to automatically determine level.\nFlame bot struggles with this, and you can manually specify the level with `!flame <level>`")
-
-
-        if(level != 0):
-            print("Level:{0}\nBase Stats: {1}\nFlame Stats: {2}".format(level, str(baseDict), str(flameDict)))
-            calc = FlameCalc.FlameCalc()
-            validFlames = calc.calcFlame(flameDict, baseDict, level)
-            return(True, validFlames)
-        else:
-            pass
-        return(False, "Unknown error")
-
     def cleanImage(self, img, thresh=95):
         img2 = img.copy()
         img2 = cv.resize(img2, (img2.shape[1] * 2, img2.shape[0] * 2), interpolation = cv.INTER_CUBIC)
         ret, img2 = cv.threshold(img2, thresh, 255, cv.THRESH_BINARY)
         return(img2)
+
 
     def cleanLevel2(self, img, thresh=95):
         img2 = img.copy()
@@ -469,6 +409,7 @@ class Flames(commands.Cog):
         kernel = np.ones((5, 5), np.float32)/30
         img2 = cv.filter2D(img2, -1, kernel)
         return(img2)
+
 
     def cleanFlame(self, img):
         ##0, 255, 204
@@ -482,45 +423,6 @@ class Flames(commands.Cog):
 
         ret, flameImg = cv.threshold(flameImg, 100, 255, cv.THRESH_BINARY)
         return(flameImg)
-
-
-    def cleanLevel(self, img):
-        levelImg = img.copy()
-        mask = cv.inRange(levelImg, np.array([0, 203, 253], dtype = "uint8"), np.array([0, 206, 255], dtype = "uint8"))
-        ret, levelImg = cv.threshold(levelImg, 127, 255, cv.THRESH_BINARY)
-        levelImg = cv.bitwise_and(levelImg, levelImg, mask=mask)
-        levelImg = cv.resize(levelImg, (levelImg.shape[1] * 2, levelImg.shape[0] * 2), interpolation = cv.INTER_CUBIC)
-        return(levelImg)
-
-    def cleanlevel2(self, img):
-        levelImg = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-        bbox = cv.boundingRect(levelImg)
-        x, y, w, h = bbox
-        w = levelImg.shape[::-1][0]
-        h = levelImg.shape[::-1][1]
-        print(bbox)
-        fg = levelImg[y:y+h, x:x+w]
-        cv.imshow("a", fg)
-        cv.waitKey(0)
-        return(fg)
-
-    def cropLevel(self, img, data):
-        data = data.copy()[~data.text.isnull()]
-        data.loc[:, "right"] = data.apply(lambda row: row.left + row.width, axis=1)
-        data.loc[:, "bottom"] = data.apply(lambda row: row.top + row.height, axis=1)
-        (x, y, x2, y2) = data["left"].min(), data["top"].min(), data["right"].max(), data["bottom"].max()
-
-        w = img.shape[1]
-        h = img.shape[0]
-        wMod = int(abs(x2 - x) * 0.25)
-        hMod = int(abs(y2 - y) * 0.25)
-        x, y, x2, y2 = max(x - wMod, 0), max(y - hMod, 0), min(x2 + wMod, w), min(y2 + hMod, h)
-
-        img2 = img.copy()[y:y2, x:x2]
-        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
-        img2 = cv.filter2D(img2, -1, kernel)
-
-        return(img2)
 
 
 async def setup(bot: commands.Bot) -> None:
