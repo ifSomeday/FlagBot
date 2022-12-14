@@ -245,7 +245,7 @@ class GPQ_Test(commands.Cog):
                 return
             gpqSync = self.bot.get_cog("GPQ_Sync")
             if gpqSync is not None:
-                scores = await gpqSync.gettopweekScores()
+                scores = await gpqSync.getWeekTopScores()
                 emb, file = await self.buildTopEmbed(scores, gpqSync, week=True, title=f"Top {n} GPQ Scores ({scores[0][2]})", numScores=n)
                 if file == None:
                     await ctx.response.send_message(embed=emb)
@@ -436,10 +436,14 @@ class GPQ_Test(commands.Cog):
     async def scoreAutocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
         gpqSync = self.bot.get_cog("GPQ_Sync")
         if gpqSync is not None:
-            ignList = await gpqSync.getIgnList()
+            ignList, ignListLower = await gpqSync.getIgnLists()
+            d = {k : v for k, v in zip(ignListLower, ignList)}
             cutoff = 0.0
             ## Get 5 closest entries
-            close = difflib.get_close_matches(current, ignList, n=5, cutoff=cutoff)
+            closeLower = difflib.get_close_matches(current, ignListLower, n=5, cutoff=cutoff)
+            print(closeLower)
+            close = [d[x] for x in closeLower]
+            print(close)
             if current == "":
                 close = ignList[:5]      ## No input is just first 5
             return([app_commands.Choice(name=ign, value=ign) for ign in close])

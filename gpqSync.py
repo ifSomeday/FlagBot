@@ -229,7 +229,7 @@ class GPQ_Sync(commands.Cog):
                     except:
                         continue
                     ## User has no scores
-                    if len(row) < 7:
+                    if len(row) < 8:
                         continue
                     ## idx: 1-ign 2-avg 3-max 4-attended 5-missed 6-total 7+ scores
                     ign = row[1]
@@ -238,8 +238,8 @@ class GPQ_Sync(commands.Cog):
                     
                     firstScore = False
 
-                    ## Start at 7 because that is where the scores start
-                    for date, score in zip(dates[7:], row[7:]):
+                    ## Start at 8 because that is where the scores start
+                    for date, score in zip(dates[8:], row[8:]):
                         ## In case we have whitespace as a score
                         score = score.strip()
                         ## Skip leading empty fields, as those indicate the user was not in the guild at that time
@@ -291,7 +291,7 @@ class GPQ_Sync(commands.Cog):
                         print(f"User {ign} is not in table")
                         continue
 
-                    needUpdate, merged = self.mergeScores(scoresRes, values[row][7:], dates[7:])
+                    needUpdate, merged = self.mergeScores(scoresRes, values[row][8:], dates[8:])
 
                     # This means we have new info in the DB, likely from OCR
                     if(needUpdate):
@@ -401,6 +401,7 @@ class GPQ_Sync(commands.Cog):
             print("Updating IGN list")
             out = await self.getAllUsersGlobal()
             self.ignList = list(out.values())
+            self.ignListLower = list([x.lower() for x in out.values()])
 
 
     ## Gets all users for autocomplete
@@ -413,8 +414,8 @@ class GPQ_Sync(commands.Cog):
                 return(out)
 
 
-    async def getIgnList(self):
-        return(self.ignList)
+    async def getIgnLists(self):
+        return(self.ignList, self.ignListLower)
 
 
 async def setup(bot: commands.Bot) -> None:
