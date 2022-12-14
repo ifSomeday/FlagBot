@@ -108,27 +108,25 @@ class Flames(commands.Cog):
                     debugBuffer = io.BytesIO(buf)
                     # files.append(discord.File(debugBuffer, filename=f"debug{i}.png"))
 
-                await ctx.reply("\n".join([str(x) for x in lines]), files=files)
+                await ctx.reply(str(lines), files=files)
                 #await ctx.reply("", embed=parsed)
             except Exception as e:
                 print(e)
                 print(traceback.print_exc())
 
 
-    async def matchImageScale(self, img, templatePath, label=""):
+    async def matchImageScale(self, img, templatePath, label="", canny=True):
         template = cv.imread(templatePath)
-        template = cv.resize(template, (template.shape[1] * 2, template.shape[0] * 2), interpolation = cv.INTER_CUBIC)
         baseH, baseW = template.shape[:2]
-        #print(f"Base bounds: {baseH}, {baseW}")
 
         edges = cv.Canny(img.copy(), 150, 200)
-        #cv.imwrite(f"templates/edges_{label}.png", edges)
+        cv.imwrite(f"templates/edges_{label}.png", edges)
 
         bestFit = None
         bestCrop = None
         bounds = None
-        #bestCanny = None
-        #bestScale = 1
+        bestCanny = None
+        bestScale = 1
 
         for scale in np.linspace(0.5, 2.0, 7):
             # resize template to a scale
@@ -150,15 +148,15 @@ class Flames(commands.Cog):
             if(bestFit == None or bestFit[0] < maxVal):
                 bestFit = (maxVal, maxLoc, scale)
                 bestCrop = img.copy()[maxLoc[1]:maxLoc[1]+tH, maxLoc[0]:maxLoc[0]+tW]
-                #bestCanny = edges.copy()[maxLoc[1]:maxLoc[1]+tH, maxLoc[0]:maxLoc[0]+tW]
+                bestCanny = edges.copy()[maxLoc[1]:maxLoc[1]+tH, maxLoc[0]:maxLoc[0]+tW]
                 bounds = (maxLoc[1], maxLoc[1]+tH, maxLoc[0], maxLoc[0]+tW)
-                #bestScale = scale
+                bestScale = scale
 
-        #print(f"Matched {templatePath} at scale {scale} with certainty {bestFit[0]}")
-        #print(f"Matched bounds {tH}, {tW}")
-        #cv.imwrite(f"templates/crop{label}.png", bestCrop)
-        #cv.imwrite(f"templates/canny{label}.png", bestCanny)
-        return(bestCrop, bestFit, bounds)
+        print(f"Matched {templatePath} at scale {bestScale} with certainty {bestFit[0]}")
+        print(f"Matched bounds {tH}, {tW}")
+        cv.imwrite(f"templates/crop_{label}.png", bestCrop)
+        cv.imwrite(f"templates/canny_{label}.png", bestCanny)
+        return(bestCrop, bestFit, bestScale, bounds)
 
 
     def buildFlameEmbed(self, flames):
@@ -182,38 +180,44 @@ class Flames(commands.Cog):
         ## Creates a resized copy of the input image for drawing on and using as debug output
         img2 = cv.resize(img.copy(), (img.shape[1] * 2, img.shape[0] * 2), interpolation = cv.INTER_CUBIC)
 
-        ## Clean up images
-        cleaned = self.cleanImage(img)
-        cleanedGrey = self.cleanImage(imgGrey, thresh=75)
-        cleanedFlame = self.cleanFlame(img)
-        cleanedLevel = self.cleanLevel(img)       
-
-        cv.imwrite(f"templates/grey.png", imgGrey)
-
-        ## TODO: DO MATCHING BEFORE RESIZING
+        ret, cropImg = cv.threshold(imgGrey, 75, 255, cv.THRESH_BINARY)
         ## Match top of stats portion
-        crop1, fit2, bounds1 = await self.matchImageScale(cleanedGrey, "assets/normal.png", label="top")
+        crop1, fit1, scale1, bounds1 = await self.matchImageScale(imgGrey, "assets/normal.png", label="top")
         ## Crop top of stats down to the bottom of the page
-        cleanedGreyCrop = cleanedGrey.copy()[bounds1[0]:, bounds1[2]:bounds1[3]]
-        cv.imwrite(f"templates/cleanedGreyCrop.png", cleanedGreyCrop)
+        cleanedGreyCrop = cropImg.copy()[bounds1[0]:, bounds1[2]:bounds1[3]]
         ## Match bottom of stats portion
-        crop2, fit2, bounds2 = await self.matchImageScale(cleanedGreyCrop, "assets/bottom.png", label="bot")
+        crop2, fit2, scale2, bounds2 = await self.matchImageScale(cleanedGreyCrop, "assets/bottom.png", label="bot")
 
         ## Use two matches to crop stats 
         flameBounds = list(bounds1)
         flameBounds[1] = flameBounds[0] + bounds2[0]
         flameBounds[0] = bounds1[1]
 
+        crop3, fit3, scale3, bounds3 = await self.matchImageScale(cropImg, "assets/reqLEV3.png", label="level")
+
+        ##offset is 53
+        levelOffset = int(25 * scale3)
+        levelCrop = cropImg[bounds3[0]:bounds3[1], bounds3[2]:bounds1[3]]
+
+        img = img[flameBounds[0]:flameBounds[1], flameBounds[2]:flameBounds[3]]
+        imgGrey = imgGrey[flameBounds[0]:flameBounds[1], flameBounds[2]:flameBounds[3]]
+
+        ## Clean up images
+        cleanedGrey = self.cleanImage(imgGrey, thresh=75)
+        cleanedFlame = self.cleanFlame(img)
+        cleanedLevel = self.cleanLevel2(levelCrop)  
+
+        cv.imwrite("templates/cleanedGrey.png", cleanedGrey)
+        cv.imwrite("templates/cleanedFlame.png", cleanedFlame)
+        cv.imwrite("templates/cleanedLevel.png", cleanedLevel)
+
+
         ## Create cropped copy of debug image for output
-        img3 = img2.copy()[flameBounds[0]:flameBounds[1], flameBounds[2]:flameBounds[3]]
-        ## Crop isolated flames to stats portion
-        flame3 = cleanedFlame.copy()[flameBounds[0]:flameBounds[1], flameBounds[2]:flameBounds[3]]
-        ## Crop full stats to stats portion
-        grey3 = cleanedGrey.copy()[flameBounds[0]:flameBounds[1], flameBounds[2]:flameBounds[3]]
+        img3 = img.copy() #[flameBounds[0]:flameBounds[1], flameBounds[2]:flameBounds[3]]
 
         # blur horizontally for contour detection
         kernel = cv.getStructuringElement(cv.MORPH_RECT, (int(460 * 1/2), int(8 * 1/2)))
-        morph = cv.morphologyEx(grey3, cv.MORPH_DILATE, kernel)
+        morph = cv.morphologyEx(cleanedGrey, cv.MORPH_DILATE, kernel)
 
         # find contours
         contours = cv.findContours(morph, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
@@ -238,10 +242,8 @@ class Flames(commands.Cog):
 
             #print(f"Height: {h}")
             # Crop and OCR just the current line plus a couple pixels to improve OCR
-            #crop = grey3[y-2:y+h+2, x:x+w]      ## Full stats
-            crop = self.cropContour(x, y, w, h, grey3)
-            cropF = self.cropContour(x, y, w, h, flame3)
-            #cropF = flame3[y-2:y+h+2, x:x+w]    ## Flames
+            crop = self.cropContour(x, y, w, h, cleanedGrey)
+            cropF = self.cropContour(x, y, w, h, cleanedFlame)
 
             out = tess.image_to_string(crop)    ## Full stats
             outF = tess.image_to_string(cropF)  ## Flames
@@ -295,10 +297,33 @@ class Flames(commands.Cog):
         print(baseDict)
 
         calc = FlameCalc.FlameCalc()
-        validFlames = calc.calcFlame(flameDict, baseDict, 200)
+        validFlames = {}
+        if level == -1:
+            cv.imwrite("levelcrop.png", cleanedLevel)
+            levelOcr = tess.image_to_string(cleanedLevel)
+            print(f"levelOcr {levelOcr}")
+            levels = re.findall(r"([\d]+)", levelOcr)
+            print(f"levels {levels}")
+
+            for level in levels:
+                res = calc.calcFlame(flameDict, baseDict, int(level))
+                if len(res) > 0:
+                    validFlames[level] = res
+
+            if validFlames == {}:
+                for level in range(0, 205, 5):
+                    res = calc.calcFlame(flameDict, baseDict, level)
+                    if len(res) > 0:
+                        validFlames[level] = res
+        
+        ## User defined level
+        else:
+            res = calc.calcFlame(flameDict, baseDict, int(level))
+            if len(res) > 0:
+                validFlames[level] = res
 
 
-        return(validFlames, (img3, morph, contourImg, grey3, flame3))
+        return(validFlames, (img3, morph, contourImg, cleanedGrey, cleanedFlame))
 
 
     def cropContour(self, x, y, w, h, img):
@@ -435,6 +460,14 @@ class Flames(commands.Cog):
         img2 = img.copy()
         img2 = cv.resize(img2, (img2.shape[1] * 2, img2.shape[0] * 2), interpolation = cv.INTER_CUBIC)
         ret, img2 = cv.threshold(img2, thresh, 255, cv.THRESH_BINARY)
+        return(img2)
+
+    def cleanLevel2(self, img, thresh=95):
+        img2 = img.copy()
+        img2 = cv.resize(img2, (img2.shape[1] * 3, img2.shape[0] * 3), interpolation = cv.INTER_CUBIC)
+        #ret, img2 = cv.threshold(img2, thresh, 255, cv.THRESH_BINARY)
+        kernel = np.ones((5, 5), np.float32)/30
+        img2 = cv.filter2D(img2, -1, kernel)
         return(img2)
 
     def cleanFlame(self, img):
