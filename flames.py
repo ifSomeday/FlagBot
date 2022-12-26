@@ -91,7 +91,8 @@ class Flames(commands.Cog):
 
     @commands.command()
     async def flame(self, ctx, level : int = -1):
-        if(ctx.channel.id != config.BOT_COMMANDS or ctx.guild.id != config.DEV_GUILD):
+        if(ctx.channel.id != config.BOT_COMMANDS and ctx.guild.id != config.DEV_GUILD):
+            print(ctx.channel.id, ctx.guild.id)
             return
         if(len(ctx.message.attachments) == 0):
             await ctx.reply("Please attach an image of an item.")
@@ -105,6 +106,7 @@ class Flames(commands.Cog):
 
                 if(lines == {}):
                     await ctx.reply("No flames found, try a different image.")
+                    return
 
                 files = []
                 for i, img in enumerate(imgs):
@@ -182,7 +184,8 @@ class Flames(commands.Cog):
         emb.title = "Flame Stats"
         emb.set_footer(text="by lostara", icon_url="https://cdn.discordapp.com/emojis/947022653082988544.png")
         emb.color = discord.Color.purple()
-        emb.set_thumbnail(url="https://cdn.discordapp.com/emojis/743215456839532604.png")
+        #emb.set_thumbnail(url="https://cdn.discordapp.com/emojis/743215456839532604.png")
+        emb.set_thumbnail(url="https://cdn.discordapp.com/emojis/724484702769119232.png")
         for level, flames in flameDict.items():
             titleText = "Level {0}".format(level)
             if inc != -1:
@@ -193,8 +196,9 @@ class Flames(commands.Cog):
             else:
                 flamesText = ["• " + ", ".join("T{0} {1}".format(flame.tier, " + ".join(flame.stats)) for flame in x) for x in flames]
                 emb.add_field(name=titleText, value="\n".join(flamesText), inline=False)
-
-        emb.add_field(name="Flame Scores", value="\n".join("• {0}: {1}".format(k, v) for k, v in flameScores.items() if v != 0))
+        flameScoreText =  "\n".join("• {0}: {1}".format(k, v) for k, v in flameScores.items() if v != 0)
+        if len(flameScoreText) > 0:
+            emb.add_field(name="Flame Scores", value=flameScoreText)
         return(emb)
 
 

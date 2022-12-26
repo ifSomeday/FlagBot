@@ -43,6 +43,7 @@ if __name__ == "__main__":
         async with client:
             await client.load_extension("serverChecker")
             #await client.load_extension("tracker")
+            await client.load_extension("flames")
             await client.load_extension("gpqSync")
             await client.load_extension("gpq")
            
