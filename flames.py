@@ -196,9 +196,19 @@ class Flames(commands.Cog):
             else:
                 flamesText = ["• " + ", ".join("T{0} {1}".format(flame.tier, " + ".join(flame.stats)) for flame in x) for x in flames]
                 emb.add_field(name=titleText, value="\n".join(flamesText), inline=False)
-        flameScoreText =  "\n".join("• {0}: {1}".format(k, v) for k, v in flameScores.items() if v != 0)
-        if len(flameScoreText) > 0:
-            emb.add_field(name="Flame Scores", value=flameScoreText)
+
+        if level == 200:
+            flameScoresText = []
+            for stat, score in flameScores.items():
+                if(score != 0):
+                    flames = math.ceil(self.calc.scoreOverFast(score))
+                    flameScoresText.append("• {0}: {1} ({2} flames)".format(stat, score, flames))
+                    if len(flameScoresText) > 0:
+                        emb.add_field(name="Flame Scores", value="{0}\n\nFlames estimates are for Misty Island".format("\n".join(flameScoreText)))
+        else:
+            flameScoreText =  "\n".join("• {0}: {1}".format(k, v) for k, v in flameScores.items() if v != 0)
+            if len(flameScoreText) > 0:
+                emb.add_field(name="Flame Scores", value=flameScoreText)
         return(emb)
 
 
