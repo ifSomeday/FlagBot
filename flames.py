@@ -39,7 +39,7 @@ class Flames(commands.Cog):
     def __init__(self, bot):
 
         self.bot = bot
-        self.flameCalc = FlameCalc.FlameCalc()
+        self.calc = FlameCalc.FlameCalc()
 
         self.statMap = {
             "str" : FlameCalc.Stats.STR,
@@ -203,8 +203,8 @@ class Flames(commands.Cog):
                 if(score != 0):
                     flames = math.ceil(self.calc.scoreOverFast(score))
                     flameScoresText.append("• {0}: {1} ({2} flames)".format(stat, score, flames))
-                    if len(flameScoresText) > 0:
-                        emb.add_field(name="Flame Scores", value="{0}\n\nFlames estimates are for Misty Island".format("\n".join(flameScoreText)))
+            if len(flameScoresText) > 0:
+                emb.add_field(name="Flame Scores", value="{0}\n\nFlames estimates are for Misty Island".format("\n".join(flameScoresText)))
         else:
             flameScoreText =  "\n".join("• {0}: {1}".format(k, v) for k, v in flameScores.items() if v != 0)
             if len(flameScoreText) > 0:
@@ -364,7 +364,7 @@ class Flames(commands.Cog):
 
         flameScores = self.calculateFlameScore(flameDict)
 
-        calc = FlameCalc.FlameCalc()
+        #calc = FlameCalc.FlameCalc()
         validFlames = {}
         inc = -1
         if level == -1:
@@ -374,7 +374,7 @@ class Flames(commands.Cog):
             levels = re.findall(r"([\d]+)", levelOcr)
 
             for level in levels:
-                res = calc.calcFlame(flameDict, baseDict, int(level))
+                res = self.calc.calcFlame(flameDict, baseDict, int(level))
                 if len(res) > 0:
                     validFlames[level] = res
 
@@ -383,13 +383,13 @@ class Flames(commands.Cog):
                 if any(x in list(flameDict.keys()) for x in [FlameCalc.Stats.MP, FlameCalc.Stats.HP]):
                     inc = 10
                 for level in range(0, 250, inc):
-                    res = calc.calcFlame(flameDict, baseDict, level)
+                    res = self.calc.calcFlame(flameDict, baseDict, level)
                     if len(res) > 0:
                         validFlames[level] = res
         
         ## User defined level
         else:
-            res = calc.calcFlame(flameDict, baseDict, int(level))
+            res = self.calc.calcFlame(flameDict, baseDict, int(level))
             if len(res) > 0:
                 validFlames[level] = res
 
@@ -439,5 +439,8 @@ class Flames(commands.Cog):
         return(flameImg)
 
 
-async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(Flames(bot))
+#async def setup(bot: commands.Bot) -> None:
+#    await bot.add_cog(Flames(bot))
+
+def setup(bot):
+    bot.add_cog(Flames(bot))

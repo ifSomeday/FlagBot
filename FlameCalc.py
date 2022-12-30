@@ -100,7 +100,7 @@ class FlameCalc():
         return(combos)
 
 
-    def gen(self, pool, allStatR = 10, secR = 1/15, atkR = 2.5):
+    def gen(self, pool, allStatR = 9, secR = 1/15, atkR = 2.5):
         res = []
         for i, f1 in enumerate(pool):
             for j, f2 in enumerate(pool[i+1:]):
@@ -239,7 +239,7 @@ class FlameCalc():
         return(allFlames)
         
 
-    def score(self, flames, mainStat, secStat, atkStat, secR=1/15, allStatR=10, atkR=2.5):
+    def score(self, flames, mainStat, secStat, atkStat, secR=1/15, allStatR=9, atkR=2.5):
         total = 0
         terms = []
         prob = 1/3876
