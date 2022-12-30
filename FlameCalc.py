@@ -2,12 +2,33 @@ from enum import Enum, auto
 import math
 import time
 import itertools
+import pickle
+import os
 import difflib
 
 class FlameCalc():
 
     def __init__(self):
+        ## Generate initial flame array
+        self.loadGenDistribution()
         pass
+
+
+    def loadGenDistribution(self):
+        filePath = "{0}/assets/dist.pickle".format(os.getcwd())
+        if os.path.exists(filePath):
+            with open(filePath, "rb") as f:
+                self.flameDist = pickle.load(f)
+        else:
+            self.flameDist = self.generateAllPossibleFlames(200, 0, 0)
+
+            start = time.time()
+            self.flameDist.sort(key=lambda t: t[0])
+            end = time.time()
+            print(f"Sorting dist took {round(end-start, 4)} seconds")
+
+            with open(filePath, "wb") as f:
+                pickle.dump(self.flameDist, f)
 
     
     def calcFlame(self, flames, baseStats, level):
@@ -77,6 +98,20 @@ class FlameCalc():
             else:
                 combos = self.search(possibleFlames[i+1:], combos, [*currentFlames, possibleFlames[i]], currDepth + 1, maxDepth=maxDepth)
         return(combos)
+
+
+    def gen(self, pool, allStatR = 10, secR = 1/15, atkR = 2.5):
+        res = []
+        for i, f1 in enumerate(pool):
+            for j, f2 in enumerate(pool[i+1:]):
+                for k, f3 in enumerate(pool[i + 2 + j:]):
+                    for l, f4 in enumerate(pool[i + j + k + 3:]):
+                        res += [self.score(flame, Stats.MAIN, Stats.SEC, Stats.ATTACK,secR=secR, allStatR=allStatR, atkR=atkR) for flame in itertools.product(f1, f2, f3, f4)]
+                        #res += [itertools.product(f1, f2, f3, f4)]
+        return(res)
+
+
+
 
     def generatePossibleFlames(self, stats, level, baseAtk, baseMatk):
         flames = []
@@ -161,6 +196,105 @@ class FlameCalc():
             flames.append(Flame([stat], max(((level // 10)) * 10, 1) * (tier * 3), tier))
         return(flames)
 
+    def generateAllPossibleFlames(self, level, baseAtk, baseMatk, weapon=False, adv=True):
+        
+        flamePools = []
+        for stat in [Stats.MAIN, Stats.SEC, Stats.NONE, Stats.NONE]:
+            flamePools.append(self.generateSingleStatFlames(stat, level)[2:7])
+
+        for c in itertools.combinations([Stats.MAIN, Stats.SEC, Stats.NONE, Stats.NONE], 2):
+            flamePools.append(self.generateDoubleStatFlames(c, level)[2:7])
+        
+        flamePools.append(self.generateHPMPFlame(Stats.HP, level)[2:7])
+        flamePools.append(self.generateHPMPFlame(Stats.MP, level)[2:7])
+
+        flamePools.append(self.generateNonWeaponAttack(Stats.SPEED)[2:7])
+        flamePools.append(self.generateNonWeaponAttack(Stats.JUMP)[2:7])
+
+        flamePools.append(self.generateSingleStatFlames(Stats.DEF, level)[2:7])
+
+        flamePools.append(self.generateNonWeaponAttack(Stats.LEVEL)[2:7]) ## Doesnt generate correct numbers, but we do not really care, just that there are 5 flames in the pool
+
+        flamePools.append(self.generateNonWeaponAttack(Stats.ALL_STAT)[2:7])
+
+        if(weapon):
+            flamePools.append(self.generateNonWeaponAttack(Stats.DMG)[2:7])
+            flamePools.append([Flame(x.stats, 2*x.value, x.tier) for x in self.generateNonWeaponAttack(Stats.BOSS)][2:7])
+
+            flamePools.append(self.generateWeaponAttack(Stats.ATTACK, baseAtk, level, advantage=adv)[2:7])
+            flamePools.append(self.generateWeaponAttack(Stats.MAGIC_ATTACK, baseMatk, level, advantage=adv)[2:7])
+        else:
+            flamePools.append(self.generateNonWeaponAttack(Stats.ATTACK)[2:7])
+            flamePools.append(self.generateNonWeaponAttack(Stats.MAGIC_ATTACK)[2:7])
+
+        #for pool in flamePools:
+        #    print(pool)
+
+        start = time.time()
+        allFlames = self.gen(flamePools)
+        end = time.time()
+        print(f"Took {round(end - start, 4)} seconds to generate all flames")
+        print(f"Generated {len(allFlames)} flames")
+
+        return(allFlames)
+        
+
+    def score(self, flames, mainStat, secStat, atkStat, secR=1/15, allStatR=10, atkR=2.5):
+        total = 0
+        terms = []
+        prob = 1/3876
+        probs = [1, 1, 0.558, 0.325,0.065, 0.032, 0.02]
+        for flame in flames:
+            prob *= probs[flame.tier-1]
+            if atkStat in flame.stats:
+                total += (atkR * flame.value)
+                terms.append(f"{flame.value}a")
+                
+            elif Stats.ALL_STAT in flame.stats:
+                total += (allStatR * flame.value)
+                terms.append(f"{flame.value}l")
+            else:
+                if secStat in flame.stats:
+                    total += (secR * flame.value)
+                    terms.append(f"({flame.value})s")
+                if mainStat in flame.stats:
+                    total += flame.value
+                    terms.append(f"{flame.value}")
+        return(total, " + ".join(terms), 0, prob)
+
+
+    def getIdxTupleFast(self, i, v):
+        idx = int(len(self.flameDist) / 2)
+        segSize = int(len(self.flameDist) / 2)
+        val = math.floor(self.flameDist[idx][i]) 
+        while(val != v and segSize > 1):
+            segSize = int(segSize/2)
+            #print(segSize, val)
+            if val < v:
+                idx = min(idx + segSize, len(self.flameDist))
+            else:
+                idx = max(idx - segSize, 0)
+            val = math.floor(self.flameDist[idx][i])
+        while self.flameDist[idx][i] >= v and idx > 0:
+            idx -= 1
+        return(idx)
+
+    def getIdxTuple(self, arr, i, v):
+        for idx, t in enumerate(arr):
+            if t[i] >= v:
+                return(idx)
+
+    def scoreOver(self, score):
+        start = self.getIdxTuple(self.flameDist, 0, score)
+        cum = sum([t[3] for t in self.flameDist[:start-1]])
+        return(1 / (1 - cum))
+
+
+    def scoreOverFast(self, score):
+        start = self.getIdxTupleFast(0, score)
+        cum = sum([t[3] for t in self.flameDist[:start]])
+        return(1 / (1 - cum))
+
 
 class Flame():
 
@@ -176,13 +310,17 @@ class Flame():
         if isinstance(other, Flame):
             if other.stats == self.stats:
                 return(True)
-        return(False)
+        return(False) 
 
 class Stats(str, Enum):
     STR = "STR"
     DEX = "DEX"
     INT = "INT"
     LUK = "LUK"
+
+    MAIN = "MAIN"
+    NONE = "NONE"
+    SEC = "SEC"
 
     ATTACK = "Attack Power"
     MAGIC_ATTACK = "Magic Attack"
