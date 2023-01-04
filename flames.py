@@ -221,7 +221,7 @@ class Flames(commands.Cog):
             flames = self.calc.scoreOverFast(score)
 
             await ctx.reply("Getting a score of {0} or greater on your totem takes an estimated {1:,} flames.".format(score, math.ceil(flames)))
-            
+
 
     def calculateFlameScore(self, flameDict):
         ## https://drive.google.com/file/d/1NK4ny-zF2mu8DzfK1QuyFlVmB961JXJm/view
@@ -362,7 +362,11 @@ class Flames(commands.Cog):
                 stat = difflib.get_close_matches(match.group(0).strip().lower(), self.statMap.keys(), cutoff=0)
                 if(len(stat) > 0):
                     flameDict[self.statMap[stat[0]]] = int(match2[0])        ## Update flame dictionary
-                    baseDict[self.statMap[stat[0]]] = int(match3[0])         ## Update base stat dictionary
+                    ## Set base dict to 0 if atk/matk less than 10, so we don't calculate weapon varients of those stats
+                    if stat[0] in ["attack power", "magic attack"] and int(match2[0]) < 10:
+                        baseDict[self.statMap[stat[0]]] = 0                         ## Update base stat dictionary (non weapon atk/matk)
+                    else:
+                        baseDict[self.statMap[stat[0]]] = int(match3[0])            ## Update base stat dictionary (rest)
                 else:
                     print("Invalid Stats {0}".format(flame))
                     return(False, "Invalid stat {0}".format(flame[0]))
