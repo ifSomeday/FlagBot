@@ -212,6 +212,17 @@ class Flames(commands.Cog):
         return(emb)
 
 
+    @commands.command()
+    async def flamesfor(self, ctx, score : int):
+        if(ctx.channel.id != config.BOT_COMMANDS and ctx.guild.id != config.DEV_GUILD):
+            print(ctx.channel.id, ctx.guild.id)
+            return
+        async with ctx.channel.typing():
+            flames = self.calc.scoreOverFast(score)
+
+            await ctx.reply("Getting a score of {0} or greater on your totem takes an estimated {1:,} flames.".format(score, math.ceil(flames)))
+            
+
     def calculateFlameScore(self, flameDict):
         ## https://drive.google.com/file/d/1NK4ny-zF2mu8DzfK1QuyFlVmB961JXJm/view
         attackRatio = 2.5
