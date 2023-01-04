@@ -41,7 +41,7 @@ class GPQ_Test(commands.Cog):
 
         # If the locating worked, these are the hard coords of the information we want
         # We do need to scale it by the factor we determined the input was scaled by.
-        X, Y = (int(48 * scale), int(87 * scale))
+        X, Y = (int(20 * scale), int(87 * scale))
         X2, Y2 = (int(503 * scale), int(502 * scale))
 
         im = im[Y:Y2, X:X2]
@@ -67,7 +67,7 @@ class GPQ_Test(commands.Cog):
 
         # Magic
         kernel = np.ones((5, 5), np.float32)/30
-        thresh = cv.filter2D(thresh, -1, kernel)
+        magicThresh = cv.filter2D(thresh, -1, kernel)
 
         # Iterate over contours (effectively parsing each line individually)
         res = []
@@ -80,12 +80,19 @@ class GPQ_Test(commands.Cog):
 
             # Crop and OCR just the current line
             crop = thresh[y:y+h, x:x+w]
-            out = tess.image_to_string(crop)
+            magicCrop = magicThresh[y:y+h, x:x+w]
+            
+            out = tess.image_to_string(magicCrop)
+            nameOut = tess.image_to_string(crop)
             
             # Clean data
             out = out.replace("\n", " ").strip()
             out = out.replace("Oo", " 0 0 ")
+            nameOut = nameOut.replace("\n", " ").strip()
+            nameOut = nameOut.replace("Oo", " 0 0 ")
+
             s = [x for x in out.split(" ") if not x == ""]
+            s2 = [x for x in nameOut.split(" ") if not x == ""]
 
             # Convert trailing entries to integers until we find one that cant be converted
             i = 0
@@ -93,8 +100,17 @@ class GPQ_Test(commands.Cog):
                 if(not isInt(s[i])):
                     break
                 else:
-                    
                     s[i] = int(s[i].replace(",", ""))
+            
+            ## s2 should have have better name reading
+            if(len(s2) >= 1 and len(s) > 1):
+                ## a period in the name indicates it was shortened, filter out what comes after
+                ## TODO: additional flag possibly, change future matching to only match up to the length of name
+                ## EX: ign "Lostara", matched "Lost..", shorten look up to 4 characters, so we are only matching the part we have  
+                name = s2[0]
+                if "." in name:
+                    name = name[:name.index(".")]
+                s[0] = name
 
             # Pad list with 0s until we reach the 5 scores we want. Tesseract doesn't read trailing 0s, so this is how we account for them        
             s += [0 for j in range(4 - (len(s) - 1 - i))]
@@ -176,7 +192,7 @@ class GPQ_Test(commands.Cog):
                         debugBuffer = io.BytesIO(buf)
 
                         added, warnings, errors = await gpqSync.addOcrData(resultsR)
-                        out = f"Added {added} entries"
+                        out = f"Added {added}/17 entries"
                         if len(warnings) > 0:
                             out += "\nWarnings:\n    {0}".format("\n    ".join(warnings))
                         if len(errors) > 0:
