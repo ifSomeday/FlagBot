@@ -172,6 +172,22 @@ class GPQ_Test(commands.Cog):
             await ctx.reply(response, files=[discord.File(debugBuffer, filename="debug.png")])
 
 
+    @commands.command()
+    async def droplatestweek(self, ctx):
+        if ctx.author.id in config.ADMINS:
+            gpqSync = self.bot.get_cog("GPQ_Sync")
+            if gpqSync is not None:
+                await gpqSync.dropLatestWeek()
+                await ctx.reply("Week dropped")
+
+    @commands.command()
+    async def getlatestweek(self, ctx):
+        if ctx.author.id in config.ADMINS:
+            gpqSync = self.bot.get_cog("GPQ_Sync")
+            if gpqSync is not None:
+                latest = await gpqSync.getLatestWeek()
+                await ctx.reply("Latest week in DB is {0}".format(latest))
+
     #@app_commands.guilds(discord.Object(config.GPQ_GUILD))
     @commands.command()
     @commands.check_any(commands.has_guild_permissions(manage_guild=True), isRightGuild())

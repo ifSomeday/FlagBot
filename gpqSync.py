@@ -216,6 +216,22 @@ class GPQ_Sync(commands.Cog):
                 scores = cur.fetchall()
                 return(scores)
 
+
+    async def dropLatestWeek(self):
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM scores WHERE week in (SELECT DISTINCT week FROM scores ORDER BY week DESC LIMIT 1)")
+                return
+
+
+    async def getLatestWeek(self):
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT DISTINCT week FROM scores ORDER BY week DESC LIMIT 1")
+                latest = cur.fetchone()
+                return(latest)
+
+
     ## Needs optimization so it isn't inserting every score every single sync
     def updateTableFromSheet(self, data):
         values = data["values"]
