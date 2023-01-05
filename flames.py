@@ -454,8 +454,8 @@ class Flames(commands.Cog):
         return(flameImg)
 
 
-#async def setup(bot: commands.Bot) -> None:
-#    await bot.add_cog(Flames(bot))
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Flames(bot))
 
-def setup(bot):
-    bot.add_cog(Flames(bot))
+#def setup(bot):
+#    bot.add_cog(Flames(bot))
