@@ -3,7 +3,6 @@ from discord.ext import commands, tasks
 
 import cv2 as cv
 import numpy as np
-import pytesseract as tess
 import io
 import os
 import difflib
@@ -15,10 +14,12 @@ import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from tabulate import tabulate
 
 from discord import app_commands
 
 import config
+from gpqImageProcessor import GPQImageProcessor
 
 
 def isRightGuild():
@@ -31,125 +32,7 @@ class GPQ_Test(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
-
-
-    async def readScores(self, im, fit):
-
-        scale = fit[2]
-
-        SCALE_FACTOR = 2
-
-        # If the locating worked, these are the hard coords of the information we want
-        # We do need to scale it by the factor we determined the input was scaled by.
-        X, Y = (int(20 * scale), int(87 * scale))
-        X2, Y2 = (int(503 * scale), int(502 * scale))
-
-        im = im[Y:Y2, X:X2]
-
-        #Resize and grayscale
-        im2 = cv.resize(im, (im.shape[1] * SCALE_FACTOR, im.shape[0] * SCALE_FACTOR), interpolation = cv.INTER_CUBIC)
-        gray = cv.cvtColor(im, cv.COLOR_BGR2GRAY)
-
-        # clean image
-        ret, thresh = cv.threshold(gray, 125, 255, cv.THRESH_BINARY)
-        thresh = cv.resize(thresh, (thresh.shape[1] * SCALE_FACTOR, thresh.shape[0] * SCALE_FACTOR), interpolation = cv.INTER_CUBIC)
-
-        # blur horizontally for contour detection
-        kernel = cv.getStructuringElement(cv.MORPH_RECT, (int(460 * SCALE_FACTOR/2), int(14 * SCALE_FACTOR/2)))
-        morph = cv.morphologyEx(thresh, cv.MORPH_DILATE, kernel)
-
-        # find contours
-        contours = cv.findContours(morph, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-        contours = contours[0] if len(contours) == 2 else contours[1]
-
-        # Invert colors (I think tess likes black on white better?)
-        thresh = cv.bitwise_not(thresh)
-
-        # Magic
-        kernel = np.ones((5, 5), np.float32)/30
-        magicThresh = cv.filter2D(thresh, -1, kernel)
-
-        # Iterate over contours (effectively parsing each line individually)
-        res = []
-        for c in contours:
-
-            # Grab the bounding box for each contour
-            box = cv.boundingRect(c)
-            x, y, w, h = box
-            cv.rectangle(im2, (x, y), (x+w, y+h), (0, 0, 255), 1)
-
-            # Crop and OCR just the current line
-            crop = thresh[y:y+h, x:x+w]
-            magicCrop = magicThresh[y:y+h, x:x+w]
-            
-            out = tess.image_to_string(magicCrop)
-            nameOut = tess.image_to_string(crop)
-            
-            # Clean data
-            out = out.replace("\n", " ").strip()
-            out = out.replace("Oo", " 0 0 ")
-            nameOut = nameOut.replace("\n", " ").strip()
-            nameOut = nameOut.replace("Oo", " 0 0 ")
-
-            s = [x for x in out.split(" ") if not x == ""]
-            s2 = [x for x in nameOut.split(" ") if not x == ""]
-
-            # Convert trailing entries to integers until we find one that cant be converted
-            i = 0
-            for i in range(len(s) - 1, 0, -1):
-                if(not isInt(s[i])):
-                    break
-                else:
-                    s[i] = int(s[i].replace(",", ""))
-            
-            ## s2 should have have better name reading
-            if(len(s2) >= 1 and len(s) > 1):
-                ## a period in the name indicates it was shortened, filter out what comes after
-                ## TODO: additional flag possibly, change future matching to only match up to the length of name
-                ## EX: ign "Lostara", matched "Lost..", shorten look up to 4 characters, so we are only matching the part we have  
-                name = s2[0]
-                if "." in name:
-                    name = name[:name.index(".")]
-                s[0] = name
-
-            # Pad list with 0s until we reach the 5 scores we want. Tesseract doesn't read trailing 0s, so this is how we account for them        
-            s += [0 for j in range(4 - (len(s) - 1 - i))]
-
-            res.append(s)
-        
-        return(res, im2)
-
-
-    async def matchGuildUI(self, img):
-        template = cv.imread("assets/member_participation_status.png")
-        baseH, baseW = template.shape[:2]
-
-        edges = cv.Canny(img.copy(), 150, 200)
-
-        bestFit = None
-        bestCrop = None
-
-        for scale in np.linspace(0.5, 2.0, 7):
-            # resize template to a scale
-            templateR = cv.resize(template.copy(), (int(baseW * scale), int(baseH * scale)), cv.INTER_CUBIC)
-            templateR = cv.Canny(templateR.copy(), 150, 200)
-            tH, tW = templateR.shape[:2]
-            
-            # make sure our template isn't larger than the matcher
-            if(img.shape[1] <= tW or img.shape[0] <= tH):
-                continue
-            
-            # Find best match
-            matches = cv.matchTemplate(edges, templateR, cv.TM_CCOEFF)
-            minVal, maxVal, minLoc, maxLoc = cv.minMaxLoc(matches)
-
-            #If this is our best overall match, save it
-            if(bestFit == None or bestFit[0] < maxVal):
-                bestFit = (maxVal, maxLoc, scale)
-                bestCrop = img.copy()[maxLoc[1]:maxLoc[1]+tH, maxLoc[0]:maxLoc[0]+tW]
-
-        cv.imwrite("crop.png", bestCrop)
-        return(bestCrop, bestFit)
+        self.processor = GPQImageProcessor()
 
 
     @commands.command()
@@ -180,6 +63,7 @@ class GPQ_Test(commands.Cog):
                 await gpqSync.dropLatestWeek()
                 await ctx.reply("Week dropped")
 
+
     @commands.command()
     async def getlatestweek(self, ctx):
         if ctx.author.id in config.ADMINS:
@@ -188,10 +72,33 @@ class GPQ_Test(commands.Cog):
                 latest = await gpqSync.getLatestWeek()
                 await ctx.reply("Latest week in DB is {0}".format(latest))
 
+
+    @commands.command()
+    @commands.check_any(commands.has_guild_permissions(manage_guild=True), commands.is_owner())
+    async def sync(self, ctx, force : bool = False):
+        async with ctx.channel.typing():
+            gpqSync = self.bot.get_cog("GPQ_Sync")
+            if gpqSync is not None:
+                await gpqSync.syncData(force = force)
+                await ctx.reply("Sync complete")
+    
+
     #@app_commands.guilds(discord.Object(config.GPQ_GUILD))
     @commands.command()
     @commands.check_any(commands.has_guild_permissions(manage_guild=True), isRightGuild())
     async def addscores(self, ctx, debug: Optional[str]):
+        async with ctx.channel.typing():
+            await self.addScoresBackend(ctx, None, True, False)
+
+
+    @commands.command()
+    @commands.check_any(commands.has_guild_permissions(manage_guild=True), commands.is_owner())
+    async def addscoresweek(self, ctx, week : str, full : bool = True):
+        async with ctx.channel.typing():
+            await self.addScoresBackend(ctx, week, full, False)
+
+
+    async def addScoresBackend(self, ctx, week, full, debug):
         try:
             gpqSync = self.bot.get_cog("GPQ_Sync")
             if gpqSync is not None:
@@ -199,16 +106,15 @@ class GPQ_Test(commands.Cog):
                     for attachment in ctx.message.attachments:
                         a = await attachment.read()
                         img = cv.imdecode(np.asarray(bytearray(a), dtype=np.uint8), cv.IMREAD_UNCHANGED)
-
-                        crop, fit = await self.matchGuildUI(img)
-                        results, debugImage = await self.readScores(crop, fit)
-                        resultsR = results[::-1]
+                        
+                        results, debugImage, fit = self.processor.processImage(img, full)
 
                         success, buf = cv.imencode(".png", debugImage)
                         debugBuffer = io.BytesIO(buf)
 
-                        added, warnings, errors = await gpqSync.addOcrData(resultsR)
+                        added, warnings, errors, dataAdded = await gpqSync.addOcrData(results, week = week)
                         out = f"Added {added}/17 entries"
+                        out += "\n```{0}```".format(tabulate(dataAdded, headers=["IGN", "OCR", "Certainty", "Score"]))
                         if len(warnings) > 0:
                             out += "\nWarnings:\n    {0}".format("\n    ".join(warnings))
                         if len(errors) > 0:
@@ -223,7 +129,8 @@ class GPQ_Test(commands.Cog):
                 await ctx.reply("GPQ Sync not loaded, contact developer")
         except Exception as e:
             print(e)
-            print(traceback.print_exc())    
+            print(traceback.print_exc())
+
 
 
     @app_commands.guilds(discord.Object(config.GPQ_GUILD), discord.Object(config.DEV_GUILD))
@@ -322,7 +229,7 @@ class GPQ_Test(commands.Cog):
                 scores = await gpqSync.getTopTotalScores()
                 ##needs to be in the format [x, charid, x, score]
                 scores = [(None, x[0], None, x[1]) for x in scores]
-                emb, file = await self.buildTopEmbed(scores, gpqSync, title=f"Top {n} Dubsly Dollar Earners (All-Time)", numScores=n, week=True)
+                emb, file = await self.buildTopEmbed(scores, gpqSync, title=f"Top {n} {config.GUILD_CURRENCY} Earners (All-Time)", numScores=n, week=True)
                 if file == None:
                     await ctx.response.send_message(embed=emb)
                 else:
@@ -342,7 +249,7 @@ class GPQ_Test(commands.Cog):
 
 
     async def buildScoreEmbed(self, ign, scores, ranking):
-        emb = discord.Embed(title=ign, description="Bounce GPQ stats", color=discord.Colour.green())
+        emb = discord.Embed(title=ign, description="{0} GPQ stats".format(config.GUILD_NAME), color=discord.Colour.green())
         file = None
 
         ## Ranking Stuff
@@ -368,7 +275,7 @@ class GPQ_Test(commands.Cog):
 
         emb.add_field(name="Average Score", value=f"{averageScore:,} points")
         emb.add_field(name="Best Score", value=f"{bestScore:,} points")
-        emb.add_field(name="Total Dubsly Dollars", value=f"{totalScore:,} points")
+        emb.add_field(name="Total {0}".format(config.GUILD_CURRENCY), value=f"{totalScore:,} points")
 
         ## Recents
         recentScores = list(reversed(scores))[:5]
@@ -398,6 +305,11 @@ class GPQ_Test(commands.Cog):
 
     async def buildGraph(self, scores, ign, scores2=[], ign2=None):
         ## Create score dictionaries and labels
+
+        ## Temp remove all scores not in 2023
+        scores = [x for x in scores if x[2].year >= 2023 ]
+        scores2 = [x for x in scores2 if x[2].year >= 2023 ]
+
         scores1Dict = {k : v for _, _, k, v in scores}
         scores2Dict = {k : v for _, _, k, v in scores2}
         xLabels = sorted(list(set([s[2] for s in scores]) | set([s[2] for s in scores2])))
@@ -455,7 +367,7 @@ class GPQ_Test(commands.Cog):
             if datetime.datetime.now() - datetime.timedelta(hours=24) < dt:
                 return(filePath)
         ## Here we either don't have an image, or its old, so get one
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(verify_ssl=False)) as session:
             async with session.get(url) as resp:
                 async with aiofiles.open(filePath, mode="wb") as f:
                     await f.write(await resp.read())

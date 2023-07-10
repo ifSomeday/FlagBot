@@ -1,0 +1,391 @@
+--
+-- PostgreSQL database dump
+--
+
+-- Dumped from database version 9.6.24
+-- Dumped by pg_dump version 9.6.24
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: plpgsql; Type: EXTENSION; Schema: -; Owner:
+--
+
+CREATE EXTENSION IF NOT EXISTS plpgsql WITH SCHEMA pg_catalog;
+
+
+--
+-- Name: EXTENSION plpgsql; Type: COMMENT; Schema: -; Owner:
+--
+
+COMMENT ON EXTENSION plpgsql IS 'PL/pgSQL procedural language';
+
+
+--
+-- Name: pg_trgm; Type: EXTENSION; Schema: -; Owner:
+--
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner:
+--
+
+COMMENT ON EXTENSION pg_trgm IS 'text similarity measurement and index searching based on trigrams';
+
+
+--
+-- Name: corrected_similarity(text, text); Type: FUNCTION; Schema: public; Owner: flag
+--
+
+CREATE FUNCTION public.corrected_similarity(string_a text, string_b text) RETURNS real
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  base_score FLOAT4;
+BEGIN
+  base_score := substring_similarity(string_a, string_b);
+  -- a good standard similarity score can raise the base_score
+  RETURN base_score + ((1.0 - base_score) * SIMILARITY(string_a, string_b));
+END;
+$$;
+
+
+ALTER FUNCTION public.corrected_similarity(string_a text, string_b text) OWNER TO flag;
+
+--
+-- Name: is_minimally_substring_similar(text, text); Type: FUNCTION; Schema: public; Owner: flag
+--
+
+CREATE FUNCTION public.is_minimally_substring_similar(string_a text, string_b text) RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  RETURN corrected_similarity(string_a, string_b) >= 0.5;
+END;
+$$;
+
+
+ALTER FUNCTION public.is_minimally_substring_similar(string_a text, string_b text) OWNER TO flag;
+
+--
+-- Name: substring_similarity(text, text); Type: FUNCTION; Schema: public; Owner: flag
+--
+
+CREATE FUNCTION public.substring_similarity(string_a text, string_b text) RETURNS real
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  a_trigrams TEXT[];
+  b_trigrams TEXT[];
+  a_tri_len INTEGER;
+  b_tri_len INTEGER;
+  common_trigrams TEXT[];
+  max_common INTEGER;
+BEGIN
+  a_trigrams = SHOW_TRGM(string_a);
+  b_trigrams = SHOW_TRGM(string_b);
+  a_tri_len = ARRAY_LENGTH(a_trigrams, 1);
+  b_tri_len = ARRAY_LENGTH(b_trigrams, 1);
+  IF (NOT (a_tri_len > 0) OR NOT (b_tri_len > 0)) THEN
+    IF (string_a = string_b) THEN
+      RETURN 1;
+    ELSE
+      RETURN 0;
+    END IF;
+  END IF;
+  common_trigrams := ARRAY(SELECT UNNEST(a_trigrams) INTERSECT SELECT UNNEST(b_trigrams));
+  max_common = LEAST(a_tri_len, b_tri_len);
+  RETURN COALESCE(ARRAY_LENGTH(common_trigrams, 1), 0)::FLOAT4 / max_common::FLOAT4;
+END;
+$$;
+
+
+ALTER FUNCTION public.substring_similarity(string_a text, string_b text) OWNER TO flag;
+
+--
+-- Name: %%%; Type: OPERATOR; Schema: public; Owner: flag
+--
+
+CREATE OPERATOR public.%%% (
+    PROCEDURE = public.is_minimally_substring_similar,
+    LEFTARG = text,
+    RIGHTARG = text,
+    COMMUTATOR = OPERATOR(public.%%%)
+);
+
+
+ALTER OPERATOR public.%%% (text, text) OWNER TO flag;
+
+SET default_tablespace = '';
+
+SET default_with_oids = false;
+
+--
+-- Name: characters; Type: TABLE; Schema: public; Owner: flag
+--
+
+CREATE TABLE public.characters (
+    id integer NOT NULL,
+    ign text,
+    class text,
+    level integer,
+    archived boolean
+);
+
+
+ALTER TABLE public.characters OWNER TO flag;
+
+--
+-- Name: characters_id_seq; Type: SEQUENCE; Schema: public; Owner: flag
+--
+
+CREATE SEQUENCE public.characters_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.characters_id_seq OWNER TO flag;
+
+--
+-- Name: characters_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: flag
+--
+
+ALTER SEQUENCE public.characters_id_seq OWNED BY public.characters.id;
+
+
+--
+-- Name: nexon_rankings; Type: TABLE; Schema: public; Owner: flag
+--
+
+CREATE TABLE public.nexon_rankings (
+    id integer NOT NULL,
+    characterimgurl text,
+    charactername text,
+    exp bigint,
+    gap integer,
+    jobdetail integer,
+    jobid integer,
+    level integer,
+    jobname text,
+    rank integer,
+    charid integer
+);
+
+
+ALTER TABLE public.nexon_rankings OWNER TO flag;
+
+--
+-- Name: nexon_rankings_id_seq; Type: SEQUENCE; Schema: public; Owner: flag
+--
+
+CREATE SEQUENCE public.nexon_rankings_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.nexon_rankings_id_seq OWNER TO flag;
+
+--
+-- Name: nexon_rankings_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: flag
+--
+
+ALTER SEQUENCE public.nexon_rankings_id_seq OWNED BY public.nexon_rankings.id;
+
+
+--
+-- Name: scores; Type: TABLE; Schema: public; Owner: flag
+--
+
+CREATE TABLE public.scores (
+    id integer NOT NULL,
+    charid integer,
+    week date,
+    score integer
+);
+
+
+ALTER TABLE public.scores OWNER TO flag;
+
+--
+-- Name: scores_id_seq; Type: SEQUENCE; Schema: public; Owner: flag
+--
+
+CREATE SEQUENCE public.scores_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.scores_id_seq OWNER TO flag;
+
+--
+-- Name: scores_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: flag
+--
+
+ALTER SEQUENCE public.scores_id_seq OWNED BY public.scores.id;
+
+
+--
+-- Name: symbol_levels; Type: TABLE; Schema: public; Owner: flag
+--
+
+CREATE TABLE public.symbol_levels (
+    id integer NOT NULL,
+    discordid bigint,
+    arcuslevel integer,
+    arcusdate date,
+    arcusxp integer,
+    odiumlevel integer,
+    odiumdate date,
+    odiumxp integer,
+    cerniumlevel integer,
+    cerniumdate date,
+    cerniumxp integer
+);
+
+
+ALTER TABLE public.symbol_levels OWNER TO flag;
+
+--
+-- Name: symbol_levels_id_seq; Type: SEQUENCE; Schema: public; Owner: flag
+--
+
+CREATE SEQUENCE public.symbol_levels_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.symbol_levels_id_seq OWNER TO flag;
+
+--
+-- Name: symbol_levels_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: flag
+--
+
+ALTER SEQUENCE public.symbol_levels_id_seq OWNED BY public.symbol_levels.id;
+
+
+--
+-- Name: characters id; Type: DEFAULT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.characters ALTER COLUMN id SET DEFAULT nextval('public.characters_id_seq'::regclass);
+
+
+--
+-- Name: nexon_rankings id; Type: DEFAULT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.nexon_rankings ALTER COLUMN id SET DEFAULT nextval('public.nexon_rankings_id_seq'::regclass);
+
+
+--
+-- Name: scores id; Type: DEFAULT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.scores ALTER COLUMN id SET DEFAULT nextval('public.scores_id_seq'::regclass);
+
+
+--
+-- Name: symbol_levels id; Type: DEFAULT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.symbol_levels ALTER COLUMN id SET DEFAULT nextval('public.symbol_levels_id_seq'::regclass);
+
+
+--
+-- Name: characters characters_pkey; Type: CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.characters
+    ADD CONSTRAINT characters_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: nexon_rankings nexon_rankings_pkey; Type: CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.nexon_rankings
+    ADD CONSTRAINT nexon_rankings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: nexon_rankings nexon_rankings_unique_charid; Type: CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.nexon_rankings
+    ADD CONSTRAINT nexon_rankings_unique_charid UNIQUE (charid);
+
+
+--
+-- Name: scores scores_pkey; Type: CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.scores
+    ADD CONSTRAINT scores_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: symbol_levels symbol_levels_pkey; Type: CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.symbol_levels
+    ADD CONSTRAINT symbol_levels_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: characters unique_character; Type: CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.characters
+    ADD CONSTRAINT unique_character UNIQUE (ign);
+
+
+--
+-- Name: scores unique_week_charid; Type: CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.scores
+    ADD CONSTRAINT unique_week_charid UNIQUE (charid, week);
+
+
+--
+-- Name: nexon_rankings nexon_rankings_charid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.nexon_rankings
+    ADD CONSTRAINT nexon_rankings_charid_fkey FOREIGN KEY (charid) REFERENCES public.characters(id);
+
+
+--
+-- Name: scores scores_charid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: flag
+--
+
+ALTER TABLE ONLY public.scores
+    ADD CONSTRAINT scores_charid_fkey FOREIGN KEY (charid) REFERENCES public.characters(id);
+
+
+--
+-- PostgreSQL database dump complete
+--

@@ -98,39 +98,50 @@ class GPQ_Sync(commands.Cog):
         return(sheet)
 
 
-    async def addOcrData(self, data):
+    async def addOcrData(self, data, week = None):
         warnings = []
         errors = []
         added = 0
+        dataAdded = []
         with self.dbConnect(auto=False) as conn:
             with conn.cursor() as cur:
-                currentWeek = self.getCurrentWeek()
+                currentWeek = self.parseWeekInput(week)
                 print(f"Current Week: {currentWeek}")
                 for d in data:
                     try:
                         print("=====================================")
                         ign = d[0]
-                        score = d[-3]
-                        cur.execute("SELECT similarity(%s, ign) as sim, id, ign FROM characters ORDER BY sim DESC", (ign, ))
+                        score = int(d[-2])
+                        cur.execute("SELECT substring_similarity(%s, ign) as sim, id, ign FROM characters ORDER BY sim DESC", (ign, ))
                         sim, charId, ign2 = cur.fetchone()
-                        print(sim, charId, ign2)
+                        print(sim, charId, ign2, d)
                         if ign2.lower() != ign.lower():
-                            print(d)
                             if sim < 0.1:
                                 error = f"Couldn't find `{ign}` in database. Are they on the sheet?"
                                 errors.append(error)
                                 print(error)
+                                continue
                             else:
                                 warn = f"Using closest match `{ign2}` for `{ign}` ({round(sim, 2)})"
                                 warnings.append(warn)
                                 print(warn)
+                        dataAdded.append([ign2, ign, sim, "{:,}".format(score)])
                         cur.execute("INSERT INTO scores (charid, week, score) VALUES (%s, %s, %s) ON CONFLICT (charid, week) DO UPDATE SET score = %s", (charId, currentWeek, score, score))
                         added += 1
                     except Exception as e:
                         print(f"Exception adding data: {e}")
                         print(traceback.print_exc())
                 conn.commit()
-        return(added, warnings, errors)
+        return(added, warnings, errors, dataAdded)
+
+    
+    def parseWeekInput(self, week):
+        if week == None:
+            return(self.getCurrentWeek())
+        else:
+            ## Turn date header into an object
+            date = datetime.datetime.strptime(week, "%y%m%d").date()
+            return(date)
 
 
     async def getNexonRanking(self, ign):
@@ -153,17 +164,18 @@ class GPQ_Sync(commands.Cog):
                 self.culvertId = prop.get("sheetId", -1)
 
 
-    def updateCharacterTable2(self, users):
+    def updateCharacterTable2(self, users, archived = False):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
                 for user in users:
-                    cur.execute("INSERT INTO characters (ign) VALUES (%s) ON CONFLICT (ign) DO NOTHING", (user[0],))
+                    if len(user) > 0:
+                        cur.execute("INSERT INTO characters (ign, archived) VALUES (%s, %s) ON CONFLICT (ign) DO UPDATE set archived = %s", (user[0], archived, archived))
 
 
     async def getUserScores(self, ign):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM characters ORDER BY SIMILARITY(ign, %s) DESC LIMIT 1;", (ign,))
+                cur.execute("SELECT id FROM characters ORDER BY substring_similarity(ign, %s) DESC LIMIT 1;", (ign,))
                 charId = cur.fetchone()[0]
                 
                 cur.execute("SELECT * FROM SCORES WHERE charid = %s ORDER BY week ASC", (charId, ))
@@ -174,7 +186,7 @@ class GPQ_Sync(commands.Cog):
     async def getRankingInfo(self, ign):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id FROM characters ORDER BY SIMILARITY(ign, %s) DESC LIMIT 1", (ign,))
+                cur.execute("SELECT id FROM characters ORDER BY substring_similarity(ign, %s) DESC LIMIT 1", (ign,))
                 charId = cur.fetchone()[0]
 
                 cur.execute("SELECT * FROM nexon_rankings WHERE charid = %s", (charId, ))
@@ -233,7 +245,7 @@ class GPQ_Sync(commands.Cog):
 
 
     ## Needs optimization so it isn't inserting every score every single sync
-    def updateTableFromSheet(self, data):
+    def updateTableFromSheet(self, data, archived = False):
         values = data["values"]
         dates = values[0]
         with self.dbConnect(auto=False) as conn:
@@ -249,8 +261,8 @@ class GPQ_Sync(commands.Cog):
                         continue
                     ## idx: 1-ign 2-avg 3-max 4-attended 5-missed 6-total 7+ scores
                     ign = row[1]
-                    cur.execute("SELECT * FROM characters ORDER BY SIMILARITY(ign, %s) DESC LIMIT 1;", (ign,))
-                    charId, ign, klass, level = cur.fetchone()
+                    cur.execute("SELECT * FROM characters ORDER BY substring_similarity(ign, %s) DESC LIMIT 1;", (ign,))
+                    charId, ign, klass, level, arch = cur.fetchone()
                     
                     firstScore = False
 
@@ -265,11 +277,13 @@ class GPQ_Sync(commands.Cog):
                             ## Found a real score, set flag so we don't skip any more empty
                             firstScore = True
                             ## Turn date header into an object
-                            date = datetime.datetime.strptime(date, "%d/%m/%y").date()
+                            date = datetime.datetime.strptime(date, config.STRPTIME_FMT).date()
                             scoreNum = 0
                             try:
+                                if score.strip() == "":
+                                    continue
                                 ## Attempt to parse score here, if it can't be parsed there is bad data
-                                scoreNum = 0 if score == '' else int(score.replace(",", ""))
+                                scoreNum = int(score.replace(",", ""))
                             except Exception as e:
                                 print(f"Unable to parse score '{score}' for {ign} on {date}")
                             ## Update that score
@@ -277,7 +291,7 @@ class GPQ_Sync(commands.Cog):
                     conn.commit()
 
 
-    def updateSheetFromTable(self, data):
+    def updateSheetFromTable(self, data, archived = False, force = False):
         values = data["values"]
         dates = values[0]
 
@@ -286,44 +300,49 @@ class GPQ_Sync(commands.Cog):
                 insertData = []
 
                 ## Get all characters
-                cur.execute("SELECT * FROM characters")
+                cur.execute("SELECT * FROM characters WHERE archived = %s", (archived, ))
                 charRes = cur.fetchall()
 
                 ## Iterate over each character
                 for char in charRes:
-                    charId, ign, klass, level = char
+                    charId, ign, klass, level, arch = char
 
                     ## Get all that characters scores
                     cur.execute("SELECT * FROM SCORES WHERE charid = %s ORDER BY week ASC", (charId, ))
                     scoresRes = cur.fetchall()
                     if(scoresRes == []):
-                        print(f"User {ign} has no scores recorded")
+                        #print(f"User {ign} has no scores recorded")
                         continue
 
                     ## Get the users first and last week of running
                     row = self.getUserRow(values, ign)
                     if(row == None):
                         ##TODO: add user to table? 
-                        print(f"User {ign} is not in table")
+                        #print(f"User {ign} is not in table")
                         continue
 
                     needUpdate, merged = self.mergeScores(scoresRes, values[row][8:], dates[8:])
 
                     # This means we have new info in the DB, likely from OCR
-                    if(needUpdate):
+                    if(needUpdate or force):
                         mergedTupleList = [(k, v) for k, v in merged.items()]
-                        sortedMergedTupleList = sorted(mergedTupleList, key=lambda x : datetime.datetime.strptime(x[0], "%d/%m/%y"))
+                        sortedMergedTupleList = sorted(mergedTupleList, key=lambda x : datetime.datetime.strptime(x[0], config.STRPTIME_FMT))
+                        print(f"{ign} len {len(sortedMergedTupleList)}")
+                        #print(sortedMergedTupleList)
+                        for d, s in sortedMergedTupleList:
+                            if d not in dates:
+                                print("Date {0} not found in dates".format(d))
                         valList = [x[1] for x in sortedMergedTupleList]
                         insertData.append(
                             {
-                                "range" : f"Culvert!{self.getColFromDate(dates, sortedMergedTupleList[0][0])}{row + 1}:{self.getColFromDate(dates, sortedMergedTupleList[-1][0])}{row + 1}",
+                                "range" : f"{'Culvert' if not archived else 'Archived Members'}!{self.getColFromDate(dates, sortedMergedTupleList[0][0])}{row + 1}:{self.getColFromDate(dates, sortedMergedTupleList[-1][0])}{row + 1}",
                                 "values" : [valList]
                             }
                         )
                 
                 ## Check if we found any new data to insert
                 if len(insertData) > 0:
-                    print(insertData)
+                    #print(insertData)
                     body = {
                         'valueInputOption': "USER_ENTERED",
                         'data' : insertData
@@ -334,7 +353,7 @@ class GPQ_Sync(commands.Cog):
 
     def mergeScores(self, dbScores, sheetScores, dates):
         f = "#" if os.name == "nt" else "-"
-        dbScoresDict = {s[2].strftime(f"%{f}d/%{f}m/%y") : s[3] for s in dbScores}
+        dbScoresDict = {s[2].strftime(config.STRFTIME_FMT) : s[3] for s in dbScores}
         sheetScoresDict = {k : v for k, v in zip(dates, sheetScores)}
         merged = sheetScoresDict.copy()
         for k, v in dbScoresDict.items():
@@ -390,9 +409,18 @@ class GPQ_Sync(commands.Cog):
     def __getWholeSheet(self):
         return(self.sheet.values().get(spreadsheetId=config.GPQ_SHEET, range="Culvert", majorDimension="ROWS").execute())
 
+    def __getWholeArchivedSheet(self):
+        return(self.sheet.values().get(spreadsheetId=config.GPQ_SHEET, range="Archived Members", majorDimension="ROWS").execute())
+
 
     def getAllUsers2(self):
         resp = self.sheet.values().get(spreadsheetId=config.GPQ_SHEET, range="Culvert!{0}:{0}".format("B"), majorDimension="ROWS").execute()
+        values = resp.get("values")[1:]
+        return(values)
+
+    
+    def getArchivedUsers(self):
+        resp = self.sheet.values().get(spreadsheetId=config.GPQ_SHEET, range="Archived Members!{0}:{0}".format("B"), majorDimension="ROWS").execute()
         values = resp.get("values")[1:]
         return(values)
 
@@ -400,19 +428,24 @@ class GPQ_Sync(commands.Cog):
     ## Since the sheet is gospel, we update first the DB based on sheet information
     ## Next, we update the sheet based on the table for **new** information the bot adds (OCR)
     ## This way, we can update the sheet to correct OCR errors the bot might encounter
-    async def syncData(self):
+    async def syncData(self, force = False):
         async with self.syncLock:
             print("Getting users")
             users = self.getAllUsers2()
+            archivedUsers = self.getArchivedUsers()
             print("Updating characters")
             self.updateCharacterTable2(users)
+            self.updateCharacterTable2(archivedUsers, archived=True)
             
             print("Getting data")
             data = self.__getWholeSheet()
+            dataArch = self.__getWholeArchivedSheet()
             print("Updating Table from Sheet")
-            self.updateTableFromSheet(data)
+            #self.updateTableFromSheet(data)
+            #self.updateTableFromSheet(dataArch, archived=True)
             print("Updating Sheet from Table")
-            self.updateSheetFromTable(data)
+            #self.updateSheetFromTable(data, force = force)
+            #self.updateSheetFromTable(dataArch, archived=True, force = force)
 
             print("Updating IGN list")
             out = await self.getAllUsersGlobal()
@@ -421,10 +454,10 @@ class GPQ_Sync(commands.Cog):
 
 
     ## Gets all users for autocomplete
-    async def getAllUsersGlobal(self):
+    async def getAllUsersGlobal(self, archived = False):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, ign FROM characters")
+                cur.execute("SELECT id, ign FROM characters WHERE archived = %s", (archived, ))
                 resp = cur.fetchall()
                 out = {id : ign for id, ign in resp}
                 return(out)
@@ -436,3 +469,56 @@ class GPQ_Sync(commands.Cog):
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(GPQ_Sync(bot))
+
+## https://stackoverflow.com/questions/43156987/postgresql-trigrams-and-similarity 
+"""
+CREATE OR REPLACE FUNCTION substring_similarity(string_a TEXT, string_b TEXT) RETURNS FLOAT4 AS $$
+DECLARE
+  a_trigrams TEXT[];
+  b_trigrams TEXT[];
+  a_tri_len INTEGER;
+  b_tri_len INTEGER;
+  common_trigrams TEXT[];
+  max_common INTEGER;
+BEGIN
+  a_trigrams = SHOW_TRGM(string_a);
+  b_trigrams = SHOW_TRGM(string_b);
+  a_tri_len = ARRAY_LENGTH(a_trigrams, 1);
+  b_tri_len = ARRAY_LENGTH(b_trigrams, 1);
+  IF (NOT (a_tri_len > 0) OR NOT (b_tri_len > 0)) THEN
+    IF (string_a = string_b) THEN
+      RETURN 1;
+    ELSE
+      RETURN 0;
+    END IF;
+  END IF;
+  common_trigrams := ARRAY(SELECT UNNEST(a_trigrams) INTERSECT SELECT UNNEST(b_trigrams));
+  max_common = LEAST(a_tri_len, b_tri_len);
+  RETURN COALESCE(ARRAY_LENGTH(common_trigrams, 1), 0)::FLOAT4 / max_common::FLOAT4;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION corrected_similarity(string_a TEXT, string_b TEXT) 
+RETURNS FLOAT4 AS $$
+DECLARE
+  base_score FLOAT4;
+BEGIN
+  base_score := substring_similarity(string_a, string_b);
+  -- a good standard similarity score can raise the base_score
+  RETURN base_score + ((1.0 - base_score) * SIMILARITY(string_a, string_b));
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION is_minimally_substring_similar(string_a TEXT, string_b TEXT) RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN corrected_similarity(string_a, string_b) >= 0.5;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OPERATOR %%% (
+  leftarg = TEXT,
+  rightarg = TEXT,
+  procedure = is_minimally_substring_similar,
+  commutator = %%%
+);
+"""
