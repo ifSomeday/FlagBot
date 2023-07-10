@@ -19,7 +19,7 @@ if __name__ == "__main__":
     @client.event
     async def on_ready():
         print("We have logged in as {0}".format(client.user))
-        game = discord.Game("Korea Guild Bro")
+        game = discord.Game("Drowsy Guild Bro")
         await client.change_presence(activity=game)
 
         print("Current tree: " + str(client.tree.get_commands()))
@@ -41,12 +41,9 @@ if __name__ == "__main__":
 
     async def main():
         async with client:
-            await client.load_extension("serverChecker")
-            #await client.load_extension("tracker")
-            await client.load_extension("flames")
             await client.load_extension("gpqSync")
             await client.load_extension("gpq")
-           
+
             await client.start(config.TOKEN)
 
 
