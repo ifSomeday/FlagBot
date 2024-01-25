@@ -168,8 +168,17 @@ class GPQ_Sync(commands.Cog):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
                 for user in users:
-                    if len(user) > 0:
-                        cur.execute("INSERT INTO characters (ign, archived) VALUES (%s, %s) ON CONFLICT (ign) DO UPDATE set archived = %s", (user[0], archived, archived))
+                    if len(user) > 0 and user[0] != "":
+                        if len(user) == 1:
+                            user.append(None)
+                        cur.execute("SELECT * FROM characters WHERE ign = %s", (user[0], ))
+                        res = cur.fetchone()
+                        if res != None:
+                            cur.execute("UPDATE characters SET class = %s, archived = %s WHERE ign = %s", (user[1], archived, user[0], ))
+                        else:
+                            cur.execute("INSERT INTO characters (ign, class, archived) VALUES (%s, %s, %s)", (user[0], user[1], archived, ))
+                        #cur.execute("INSERT INTO characters (ign, class, archived) VALUES (%s, %s, %s) ON CONFLICT (ign) DO UPDATE set archived = %s", (user[0], user[1], archived, archived))
+                        #cur.execute("INSERT INTO characters (ign, archived) VALUES (%s, %s) ON CONFLICT (ign) DO UPDATE set archived = %s", (user[0], archived, archived))
 
 
     async def getUserScores(self, ign):
@@ -181,6 +190,37 @@ class GPQ_Sync(commands.Cog):
                 cur.execute("SELECT * FROM SCORES WHERE charid = %s ORDER BY week ASC", (charId, ))
                 scores = cur.fetchall()
                 return(scores)
+
+    
+    async def getClassScores(self, cl):
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                if cl != None:
+                    if not cl in self.classDict.keys():
+                        return(None)
+                    ids = self.classDict[cl]
+                    out = []
+                    for id in ids:
+                        cur.execute("SELECT * FROM characters WHERE id = %s", (id, ))
+                        ret = cur.fetchone()
+                        if not ret[4]:
+                            cur.execute("SELECT * FROM SCORES WHERE charid = %s ORDER BY score DESC", (id, ))
+                            out.append(cur.fetchall())
+                    return(out)
+
+    
+    async def deleteUser(self, ign):
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM characters WHERE ign=%s", (ign, ))
+                res = cur.fetchone()
+                if res == None:
+                    return False
+                charId = res[0]
+                cur.execute("DELETE FROM nexon_rankings WHERE charid=%s", (charId, ))
+                cur.execute("DELETE FROM scores WHERE charid=%s", (charId, ))
+                cur.execute("DELETE FROM characters WHERE id=%s", (charId, ))
+                return(True)
 
 
     async def getRankingInfo(self, ign):
@@ -194,21 +234,33 @@ class GPQ_Sync(commands.Cog):
                 return(ranking)
 
 
-    async def getWeekTopScores(self, week=None):
+    async def getWeekTopScores(self, week=None, cl=None):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
                 if week == None:
                     cur.execute("SELECT week FROM SCORES ORDER BY week DESC LIMIT 1")
                     week = cur.fetchone()[0]
-                cur.execute("SELECT * FROM SCORES WHERE week = %s ORDER BY score DESC LIMIT 20", (week, ))
+                if cl != None:
+                    if not cl in self.classDict.keys():
+                        return(None)
+                    ids = self.classDict[cl]
+                    cur.execute("SELECT * FROM SCORES WHERE week = %s AND charid IN %s ORDER BY score DESC LIMIT 20", (week, tuple(ids), ))
+                else:
+                    cur.execute("SELECT * FROM SCORES WHERE week = %s ORDER BY score DESC LIMIT 20", (week, ))
                 scores = cur.fetchall()
                 return(scores)
 
 
-    async def getTopScores(self):
+    async def getTopScores(self, cl=None):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM (SELECT DISTINCT ON (charid) * FROM scores ORDER BY charid, score DESC) t ORDER BY score DESC LIMIT 20")
+                if cl != None:
+                    if not cl in self.classDict.keys():
+                        return(None)
+                    ids = self.classDict[cl]
+                    cur.execute("SELECT * FROM (SELECT DISTINCT ON (charid) * FROM scores WHERE charid IN %s ORDER BY charid, score DESC) t ORDER BY score DESC LIMIT 20", (tuple(ids), ))
+                else:
+                    cur.execute("SELECT * FROM (SELECT DISTINCT ON (charid) * FROM scores ORDER BY charid, score DESC) t ORDER BY score DESC LIMIT 20")
                 scores = cur.fetchall()
                 return(scores)
 
@@ -221,10 +273,16 @@ class GPQ_Sync(commands.Cog):
                 return(character)
 
 
-    async def getTopTotalScores(self):
+    async def getTopTotalScores(self, cl=None):
         with self.dbConnect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT charid, sum(score) FROM scores GROUP BY charid ORDER BY sum(score) DESC")
+                if cl != None:
+                    if not cl in self.classDict.keys():
+                        return(None)
+                    ids = self.classDict[cl]
+                    cur.execute("SELECT charid, sum(score) FROM scores WHERE charid IN %s GROUP BY charid ORDER BY sum(score) DESC", (tuple(ids), ))
+                else:
+                    cur.execute("SELECT charid, sum(score) FROM scores GROUP BY charid ORDER BY sum(score) DESC")
                 scores = cur.fetchall()
                 return(scores)
 
@@ -414,13 +472,13 @@ class GPQ_Sync(commands.Cog):
 
 
     def getAllUsers2(self):
-        resp = self.sheet.values().get(spreadsheetId=config.GPQ_SHEET, range="Culvert!{0}:{0}".format("B"), majorDimension="ROWS").execute()
+        resp = self.sheet.values().get(spreadsheetId=config.GPQ_SHEET, range="Culvert!{0}:{1}".format("B", "C"), majorDimension="ROWS").execute()
         values = resp.get("values")[1:]
         return(values)
 
     
     def getArchivedUsers(self):
-        resp = self.sheet.values().get(spreadsheetId=config.GPQ_SHEET, range="Archived Members!{0}:{0}".format("B"), majorDimension="ROWS").execute()
+        resp = self.sheet.values().get(spreadsheetId=config.GPQ_SHEET, range="Archived Members!{0}:{1}".format("B", "C"), majorDimension="ROWS").execute()
         values = resp.get("values")[1:]
         return(values)
 
@@ -451,6 +509,16 @@ class GPQ_Sync(commands.Cog):
             out = await self.getAllUsersGlobal()
             self.ignList = list(out.values())
             self.ignListLower = list([x.lower() for x in out.values()])
+            
+            out = await self.getAllClasses()
+            self.classList = list(set([x[1] for x in out if x[1] != None]))
+            self.classListLower = [x.lower() for x in self.classList]
+            self.classDict = {}
+            
+            for i, cl in out:
+                self.classDict.setdefault(cl, [])
+                self.classDict[cl].append(i)
+
 
 
     ## Gets all users for autocomplete
@@ -463,8 +531,20 @@ class GPQ_Sync(commands.Cog):
                 return(out)
 
 
+    async def getAllClasses(self, archived = False):
+        with self.dbConnect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, class FROM characters WHERE archived = %s", (archived, ))
+                resp = cur.fetchall()
+                return(resp)
+
+
     async def getIgnLists(self):
         return(self.ignList, self.ignListLower)
+
+    
+    async def getClassLists(self):
+        return(self.classList, self.classListLower)
 
 
 async def setup(bot: commands.Bot) -> None:
