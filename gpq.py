@@ -343,11 +343,6 @@ class GPQ_Test(commands.Cog):
 
         sixthRelease = datetime.date(2023, 11, 27)
         preSixthScores = [s for s in scores if s[2] < sixthRelease]
-        preSixthRecord = max([s[3] for s in preSixthScores])
-
-        ## Drowsy specific improvement goals
-        recent8 = list(reversed(preSixthScores))[:8]
-        median = statistics.median([s[3] for s in recent8])
 
         emb.add_field(name="Average Score", value=f"{averageScore:,} points")
         emb.add_field(name="Best Score", value=f"{bestScore:,} points")
@@ -357,8 +352,9 @@ class GPQ_Test(commands.Cog):
         recentScores = list(reversed(scores))[:5]
         recentAvg = round(sum([x[3] for x  in recentScores])/5)
         emb.add_field(name="Recent Average", value=f"{recentAvg:,} points")
-        emb.add_field(name="Legacy Record", value=f"{preSixthRecord:,} points")
-        emb.add_field(name="Pre-6th Median", value=f"{median:,} points")
+        if len(preSixthScores) > 0:
+            preSixthRecord = max([s[3] for s in preSixthScores])
+            emb.add_field(name="Legacy Record", value=f"{preSixthRecord:,} points")
         emb.add_field(name="Recent Scores", value="```{0}```".format("\n".join(["{0}: {1:,}".format(s[2], s[3]) for s in recentScores])), inline=False)
 
         return(emb, file)
